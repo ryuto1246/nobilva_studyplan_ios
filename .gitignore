@@ -1,0 +1,34 @@
+# macOS
+.DS_Store
+
+# Xcode
+build/
+DerivedData/
+*.xcuserstate
+xcuserdata/
+*.xcworkspace/xcuserdata/
+*.xcodeproj/xcuserdata/
+*.xcodeproj/project.xcworkspace/xcuserdata/
+
+# Swift Package Manager
+.build/
+.swiftpm/
+Package.resolved
+
+# CocoaPods (未使用だが将来のため)
+Pods/
+
+# Carthage (未使用だが将来のため)
+Carthage/Build/
+
+# fastlane (未使用だが将来のため)
+fastlane/report.xml
+fastlane/screenshots/**/*.png
+fastlane/test_output
+
+# ローカル秘密鍵など
+*.p8
+*.p12
+*.mobileprovision
+*.cer
+AuthKey_*.p8
