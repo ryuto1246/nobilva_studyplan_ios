@@ -4,7 +4,7 @@ import SwiftUI
 /// 生徒視点なので「今日何をやるか」がすぐ見え、上下スクロールで過去/未来が確認できる。
 ///
 /// 構成:
-///  1. 割り当てなしのタスク (scheduled_date が nil のもの)
+///  1. 割り当てなしのタスク (scheduled_date が nil かつ plan_items 未参照のもの)
 ///  2. 学習計画: 日付昇順の Card 縦積み。今日は accent で強調。
 struct PlanListView: View {
     @EnvironmentObject var auth: AuthStore
@@ -67,10 +67,8 @@ struct PlanListView: View {
                 if dayEntries.isEmpty, let cached = PlanRepository.cachedPeriods() {
                     dayEntries = buildEntries(from: cached, today: today)
                 }
-                if unscheduledTasks.isEmpty, let cachedTasks = TasksRepository.cachedList() {
-                    unscheduledTasks = cachedTasks.filter {
-                        ($0.scheduledDate ?? "").isEmpty && $0.status != .completed
-                    }
+                if unscheduledTasks.isEmpty, let cachedTasks = TasksRepository.cachedUnscheduled() {
+                    unscheduledTasks = cachedTasks.filter { $0.status != .completed }
                 }
                 await load()
                 try? await Task.sleep(nanoseconds: 200_000_000)
@@ -284,12 +282,10 @@ struct PlanListView: View {
         let taskRepo = TasksRepository(api: auth.api)
         do {
             async let periods = repo.fetchPeriods()
-            async let tasks = taskRepo.list()
+            async let tasks = taskRepo.listUnscheduled()
             let (fetchedPeriods, fetchedTasks) = try await (periods, tasks)
             dayEntries = buildEntries(from: fetchedPeriods, today: today)
-            unscheduledTasks = fetchedTasks.filter {
-                ($0.scheduledDate ?? "").isEmpty && $0.status != .completed
-            }
+            unscheduledTasks = fetchedTasks.filter { $0.status != .completed }
         } catch let e as APIError {
             if dayEntries.isEmpty && unscheduledTasks.isEmpty {
                 errorMessage = e.errorDescription

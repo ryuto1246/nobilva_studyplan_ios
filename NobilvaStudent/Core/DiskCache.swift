@@ -21,7 +21,7 @@ enum DiskCache {
         case chatPartners = "chat-partners"
         case meetings = "meetings"
         case meetingsWithPast = "meetings-with-past"
-        case tasks = "tasks"
+        case unscheduledTasks = "unscheduled-tasks"
         case periods = "plan-periods"
     }
 

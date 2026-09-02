@@ -3,14 +3,17 @@ import Foundation
 struct TasksRepository {
     let api: APIClient
 
-    func list() async throws -> [StudentTask] {
-        let list: [StudentTask] = try await api.get("/api/v1/student/tasks")
-        DiskCache.write(list, key: .tasks)
+    /// scheduled_date が null かつ、まだどの日別プランにも拾われていないタスク。
+    /// Web の getUnscheduledTasksForStudent と同じフィルタを API 側で適用済み
+    /// なので、クライアントで scheduled_date を再判定する必要はない。
+    func listUnscheduled() async throws -> [StudentTask] {
+        let list: [StudentTask] = try await api.get("/api/v1/student/tasks/unscheduled")
+        DiskCache.write(list, key: .unscheduledTasks)
         return list
     }
 
-    static func cachedList() -> [StudentTask]? {
-        DiskCache.read([StudentTask].self, key: .tasks)
+    static func cachedUnscheduled() -> [StudentTask]? {
+        DiskCache.read([StudentTask].self, key: .unscheduledTasks)
     }
 
     func overdue() async throws -> [StudentTask] {
