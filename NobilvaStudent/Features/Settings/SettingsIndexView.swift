@@ -30,11 +30,6 @@ struct SettingsIndexView: View {
                     NavigationLink { NotificationsSettingsView().environmentObject(auth) } label: {
                         Label("通知設定", systemImage: "bell")
                     }
-                    if let url = URL(string: "https://studyplan.nobilva.jp/settings/notifications") {
-                        Link(destination: url) {
-                            Label("LINE と連携する (Web)", systemImage: "message.fill")
-                        }
-                    }
                 }
                 Section("セキュリティ") {
                     NavigationLink { SecuritySettingsView().environmentObject(auth) } label: {
@@ -263,7 +258,7 @@ struct NotificationsSettingsView: View {
                 Toggle("ストリーク切れ警告", isOn: Binding(get: { prefs.streakAlerts ?? false }, set: { new in prefs = replace(prefs, streakAlerts: new) }))
             }
             Section {
-                Text("※ 通知は LINE に届きます。設定の同期は Web と共通です。")
+                Text("※ 通知はこの端末のプッシュ通知で届きます。iPhone の設定アプリで Nobilva の通知を許可しておいてください。")
                     .font(.caption).foregroundStyle(.secondary)
             }
             Section {
