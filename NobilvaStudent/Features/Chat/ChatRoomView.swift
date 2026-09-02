@@ -18,6 +18,8 @@ struct ChatRoomView: View {
     // 送信直後の optimistic 表示用
     @State private var optimistic: [ChatMessage] = []
 
+    @FocusState private var isInputFocused: Bool
+
     var body: some View {
         VStack(spacing: 0) {
             messageScroll
@@ -49,10 +51,18 @@ struct ChatRoomView: View {
                 .padding(12)
             }
             .background(Theme.groupedBackground)
+            .scrollDismissesKeyboard(.interactively)
             .refreshable { await load() }
             .onChange(of: (messages + optimistic).last?.id) { _, newId in
                 if let id = newId {
                     withAnimation { proxy.scrollTo(id, anchor: .bottom) }
+                }
+            }
+            // キーボード出現時、ScrollView が縮んで最下部メッセージが隠れるので追従スクロール
+            .onChange(of: isInputFocused) { _, focused in
+                guard focused, let last = (messages + optimistic).last?.id else { return }
+                DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) {
+                    withAnimation { proxy.scrollTo(last, anchor: .bottom) }
                 }
             }
         }
@@ -112,7 +122,7 @@ struct ChatRoomView: View {
             TextField("メッセージ", text: $draft, axis: .vertical)
                 .textFieldStyle(.plain)
                 .lineLimit(1...6)
-                .submitLabel(.send)
+                .focused($isInputFocused)
                 .padding(.leading, 16)
                 // 1 行時に送信ボタンと垂直中心を合わせるための余白。
                 // ボタン (30) + padding.bottom (7) = 37 で、TextField 側は
