@@ -62,4 +62,14 @@ struct ChatRepository {
     func markRead(threadId: String) async throws {
         let _: EmptyResponse = try await api.postVoid("/api/v1/student/chat/\(threadId)/read")
     }
+
+    /// Web `sendTaskChatMessage` 相当。
+    /// スレッドを取得(なければ作成)し、`::task::` プレフィックスで包んだ相談メッセージを送る。
+    @discardableResult
+    func sendTaskConsultation(teacherId: String, card: ChatTaskCard, message: String) async throws -> String {
+        let thread = try await createOrGetThread(teacherId: teacherId)
+        let body = ChatTaskCardParser.encode(card: card, message: message)
+        _ = try await send(threadId: thread.threadId, body: body)
+        return thread.threadId
+    }
 }

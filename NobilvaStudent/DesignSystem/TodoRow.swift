@@ -11,6 +11,7 @@ struct TodoRow: View {
     var prominent: Bool = false
     var onToggle: (() -> Void)? = nil
     var onStart: (() -> Void)? = nil
+    var onConsult: (() -> Void)? = nil
 
     var body: some View {
         HStack(alignment: .top, spacing: 12) {
@@ -57,6 +58,16 @@ struct TodoRow: View {
                     .buttonStyle(.borderedProminent)
                     .buttonBorderShape(.circle)
                     .controlSize(.small)
+                }
+                if let onConsult, status != .completed {
+                    Button(action: onConsult) {
+                        Image(systemName: "message")
+                            .font(.subheadline)
+                            .foregroundStyle(Theme.secondaryLabel)
+                            .frame(width: 28, height: 28)
+                    }
+                    .buttonStyle(.plain)
+                    .accessibilityLabel("このタスクについて相談する")
                 }
                 if let onToggle {
                     Button(action: onToggle) {

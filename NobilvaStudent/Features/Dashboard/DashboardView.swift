@@ -7,6 +7,8 @@ struct DashboardView: View {
     @State private var showBusyEditor = false
     /// エラー時にダイアログ表示する (画面内のカードでは出さない、統一方針)。
     @State private var errorMessage: String?
+    /// 「相談する」タップで開くシート用。ChatTaskCard を wrap した Identifiable。
+    @State private var consulting: ConsultingRequest?
 
     var body: some View {
         NavigationStack {
@@ -20,6 +22,10 @@ struct DashboardView: View {
                 }
                 .onChange(of: vm.stateErrorMessage) { _, msg in errorMessage = msg }
                 .errorAlert($errorMessage)
+                .sheet(item: $consulting) { req in
+                    TaskChatSheet(card: req.card)
+                        .environmentObject(auth)
+                }
         }
     }
 
@@ -202,6 +208,17 @@ struct DashboardView: View {
                                     }
                                 }
                                 Spacer()
+                                Button {
+                                    consulting = ConsultingRequest(card: .fromTask(
+                                        title: t.title, subject: t.subject, estimatedMinutes: t.estimatedMinutes))
+                                } label: {
+                                    Image(systemName: "message")
+                                        .font(.subheadline)
+                                        .foregroundStyle(Theme.secondaryLabel)
+                                        .frame(width: 28, height: 28)
+                                }
+                                .buttonStyle(.plain)
+                                .accessibilityLabel("このタスクについて相談する")
                             }
                             .padding(.vertical, 6)
                             if i != s.overdueTasks.count - 1 { Divider() }
@@ -273,7 +290,9 @@ struct DashboardView: View {
                             status: item.status,
                             prominent: i == 0 && item.status != .completed,
                             onToggle: { Task { await vm.toggleItem(item) } },
-                            onStart: { router.startTimer(with: item.id) }
+                            onStart: { router.startTimer(with: item.id) },
+                            onConsult: { consulting = ConsultingRequest(card: .fromPlanItem(
+                                title: item.title, subject: item.subject, durationMinutes: item.durationMinutes)) }
                         )
                         if i != sorted.count - 1 { Divider() }
                     }
@@ -325,6 +344,13 @@ struct DashboardView: View {
             BusySlotsEditorView()
                 .environmentObject(auth)
         }
+    }
+
+    /// `.sheet(item:)` は Identifiable が必要。ChatTaskCard に UUID を持たせず、
+    /// タップ都度この wrapper でシート発火するようにしている。
+    private struct ConsultingRequest: Identifiable {
+        let id = UUID()
+        let card: ChatTaskCard
     }
 
     private func planEntryLink(_ s: DashboardSummary) -> some View {

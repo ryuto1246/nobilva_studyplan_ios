@@ -13,10 +13,56 @@ struct ChatTaskCard: Codable, Hashable {
     let title: String
     let subject: String
     let amount: String
+
+    /// Web `getPlanAmountLabel` 相当。title に `（xxx）` が含まれていればそれを、
+    /// 無ければ `約{formatMinutes(minutes)}` を amount として使う。
+    static func fromPlanItem(title: String, subject: String, durationMinutes: Int) -> ChatTaskCard {
+        return ChatTaskCard(title: title, subject: subject, amount: planAmountLabel(title: title, minutes: durationMinutes))
+    }
+
+    /// タスクベース (StudentTask 等) 用。`約{formatMinutes(minutes)}` 固定。
+    static func fromTask(title: String, subject: String, estimatedMinutes: Int) -> ChatTaskCard {
+        return ChatTaskCard(title: title, subject: subject, amount: "約\(formatMinutes(estimatedMinutes))")
+    }
+}
+
+/// Web `lib/utils.ts formatMinutes` 相当: "60分" / "1時間" / "1時間30分"。
+func formatMinutes(_ minutes: Int) -> String {
+    let h = minutes / 60
+    let m = minutes % 60
+    if h == 0 { return "\(m)分" }
+    if m == 0 { return "\(h)時間" }
+    return "\(h)時間\(m)分"
+}
+
+/// Web `getPlanAmountLabel`: title に `（...）` があれば括弧内、無ければ `約{分}`。
+private func planAmountLabel(title: String, minutes: Int) -> String {
+    if let range = title.range(of: #"（([^）]+)）"#, options: .regularExpression) {
+        let inside = title[range].dropFirst().dropLast()
+        return String(inside)
+    }
+    return "約\(formatMinutes(minutes))"
 }
 
 enum ChatTaskCardParser {
-    private static let marker = "::task::"
+    static let marker = "::task::"
+
+    /// Web `encodeTaskCardBody` と同じ仕様で body を組み立てる。
+    /// `::task::{JSON}\n\n<trimmed message>`。
+    static func encode(card: ChatTaskCard, message: String) -> String {
+        let payload = ChatTaskCard(
+            title: card.title.trimmingCharacters(in: .whitespaces),
+            subject: card.subject.trimmingCharacters(in: .whitespaces),
+            amount: card.amount.trimmingCharacters(in: .whitespaces)
+        )
+        // JSONEncoder の key 順は非決定的だが、パース側は key 名でデコードするので問題ない。
+        let encoder = JSONEncoder()
+        encoder.outputFormatting = []
+        let jsonData = (try? encoder.encode(payload)) ?? Data()
+        let jsonString = String(data: jsonData, encoding: .utf8) ?? "{}"
+        let trimmed = message.trimmingCharacters(in: .whitespacesAndNewlines)
+        return "\(marker)\(jsonString)\n\n\(trimmed)"
+    }
 
     static func parse(_ body: String) -> (card: ChatTaskCard, message: String)? {
         guard body.hasPrefix(marker) else { return nil }
