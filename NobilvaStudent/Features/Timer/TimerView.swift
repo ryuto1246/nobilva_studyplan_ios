@@ -44,7 +44,7 @@ struct TimerView: View {
             }
             .errorAlert($errorMessage)
             .sheet(isPresented: $showManualSheet) {
-                ManualRecordSheet(todayItems: todayItems) { minutes, planItemId in
+                ManualRecordSheet(todayItems: todayItems, initialPlanItemId: selectedItemId) { minutes, planItemId in
                     Task { await manualRecord(minutes: minutes, planItemId: planItemId) }
                 }
                 .environmentObject(auth)
@@ -132,7 +132,7 @@ struct TimerView: View {
         Button {
             showManualSheet = true
         } label: {
-            Label("あとから手動で記録", systemImage: "square.and.pencil")
+            Label("手動で記録", systemImage: "square.and.pencil")
                 .font(.subheadline)
         }
         .buttonStyle(.plain)
@@ -229,7 +229,13 @@ private struct ManualRecordSheet: View {
     let onSubmit: (Int, String?) -> Void
 
     @State private var minutes: Int = 30
-    @State private var planItemId: String? = nil
+    @State private var planItemId: String?
+
+    init(todayItems: [PlanItem], initialPlanItemId: String?, onSubmit: @escaping (Int, String?) -> Void) {
+        self.todayItems = todayItems
+        self.onSubmit = onSubmit
+        _planItemId = State(initialValue: initialPlanItemId)
+    }
 
     var body: some View {
         NavigationStack {
