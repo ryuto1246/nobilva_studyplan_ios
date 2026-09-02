@@ -1,4 +1,5 @@
 import SwiftUI
+import AuthenticationServices
 
 struct LoginView: View {
     @EnvironmentObject var auth: AuthStore
@@ -13,7 +14,9 @@ struct LoginView: View {
 
     enum Field { case identifier, password }
 
-    @State private var showPasswordSection = false
+    /// パスキーログインに失敗したときの案内 (キャンセルは除く)。
+    /// パスワード欄の直上に inline 表示し、パスワードでの再挑戦へ促す。
+    @State private var passkeyHint: String?
     @State private var remembered: RememberedIdentity.Snapshot?
 
     var body: some View {
@@ -23,15 +26,9 @@ struct LoginView: View {
                 ScrollView {
                     VStack(alignment: .leading, spacing: 20) {
                         header
-                        passkeyPrimary
-                        if remembered != nil {
-                            switchAccountButton
-                        }
-                        if showPasswordSection {
-                            passwordFallback
-                        } else {
-                            togglePasswordButton
-                        }
+                        passkeySection
+                        orDivider
+                        passwordSection
                         recoveryButton
                     }
                     .padding(.horizontal, 20)
@@ -57,19 +54,7 @@ struct LoginView: View {
         }
     }
 
-    private var switchAccountButton: some View {
-        Button {
-            RememberedIdentity.forget()
-            remembered = nil
-            identifier = ""
-            password = ""
-        } label: {
-            Text("違うアカウントで入る")
-                .font(.footnote)
-                .foregroundStyle(.secondary)
-        }
-        .frame(maxWidth: .infinity)
-    }
+    // MARK: - Header
 
     private var header: some View {
         VStack(alignment: .leading, spacing: 12) {
@@ -101,13 +86,10 @@ struct LoginView: View {
         .padding(.bottom, 4)
     }
 
-    private var passkeyPrimary: some View {
+    // MARK: - Passkey (Face ID) section
+
+    private var passkeySection: some View {
         VStack(spacing: 12) {
-            // 覚えている identifier がある場合は入力欄を出さない
-            // (Face ID 一発で入れる方が「戻ってきた人」体験としてクリーン)。
-            if remembered == nil {
-                identifierField
-            }
             Button {
                 Task { await tryPasskey() }
             } label: {
@@ -121,6 +103,79 @@ struct LoginView: View {
             }
             .buttonStyle(.borderedProminent)
             .disabled(isSubmitting)
+
+            if let hint = passkeyHint {
+                passkeyHintView(hint)
+            }
+
+            if remembered != nil {
+                switchAccountButton
+            }
+        }
+    }
+
+    private func passkeyHintView(_ text: String) -> some View {
+        HStack(alignment: .top, spacing: 8) {
+            Image(systemName: "info.circle")
+                .foregroundStyle(.secondary)
+            Text(text)
+                .font(.footnote)
+                .foregroundStyle(.secondary)
+                .fixedSize(horizontal: false, vertical: true)
+            Spacer(minLength: 0)
+        }
+        .padding(.horizontal, 12)
+        .padding(.vertical, 10)
+        .background {
+            RoundedRectangle(cornerRadius: 12, style: .continuous)
+                .fill(Theme.secondaryBackground)
+        }
+    }
+
+    private var switchAccountButton: some View {
+        Button {
+            RememberedIdentity.forget()
+            remembered = nil
+            identifier = ""
+            password = ""
+            passkeyHint = nil
+        } label: {
+            Text("違うアカウントで入る")
+                .font(.footnote)
+                .foregroundStyle(.secondary)
+        }
+        .frame(maxWidth: .infinity)
+    }
+
+    // MARK: - Divider
+
+    private var orDivider: some View {
+        HStack(spacing: 12) {
+            Rectangle().fill(Theme.separator.opacity(0.5)).frame(height: 0.5)
+            Text("または")
+                .font(.footnote)
+                .foregroundStyle(.secondary)
+            Rectangle().fill(Theme.separator.opacity(0.5)).frame(height: 0.5)
+        }
+        .padding(.vertical, 4)
+    }
+
+    // MARK: - Password section
+
+    private var passwordSection: some View {
+        VStack(spacing: 12) {
+            identifierField
+            passwordField
+            Button(action: submit) {
+                HStack(spacing: 8) {
+                    if isSubmitting { ProgressView() }
+                    Text("パスワードでログイン").bold()
+                }
+                .frame(maxWidth: .infinity)
+                .padding(.vertical, 4)
+            }
+            .glassOrBorderedButtonStyle()
+            .disabled(isSubmitting || identifier.isEmpty || password.isEmpty)
         }
     }
 
@@ -146,38 +201,6 @@ struct LoginView: View {
         }
         .overlay { shape.strokeBorder(Theme.separator.opacity(0.35), lineWidth: 0.5) }
         .clipShape(shape)
-    }
-
-    private var togglePasswordButton: some View {
-        Button {
-            withAnimation { showPasswordSection = true }
-        } label: {
-            Text("パスワードでログインする")
-                .font(.footnote)
-        }
-        .frame(maxWidth: .infinity)
-        .padding(.top, 8)
-    }
-
-    private var passwordFallback: some View {
-        VStack(spacing: 12) {
-            // 覚えている場合は passkeyPrimary で identifier フィールドを隠しているので
-            // ここで表示する (prefill 済み、確認用としても機能する)。
-            if remembered != nil {
-                identifierField
-            }
-            passwordField
-            Button(action: submit) {
-                HStack(spacing: 8) {
-                    if isSubmitting { ProgressView() }
-                    Text("パスワードでログイン").bold()
-                }
-                .frame(maxWidth: .infinity)
-                .padding(.vertical, 4)
-            }
-            .glassOrBorderedButtonStyle()
-            .disabled(isSubmitting || identifier.isEmpty || password.isEmpty)
-        }
     }
 
     private var passwordField: some View {
@@ -232,7 +255,7 @@ struct LoginView: View {
         .padding(.top, 12)
     }
 
-    // MARK: - Helpers
+    // MARK: - Actions
 
     private func submit() {
         Task { await performLogin() }
@@ -253,15 +276,21 @@ struct LoginView: View {
 
     private func tryPasskey() async {
         errorMessage = nil
+        passkeyHint = nil
         isSubmitting = true
         defer { isSubmitting = false }
         do {
             let id = identifier.trimmingCharacters(in: .whitespaces)
             try await auth.loginWithPasskey(identifier: id.isEmpty ? nil : id)
-        } catch let e as APIError {
-            errorMessage = e.errorDescription
+        } catch let e as ASAuthorizationError where e.code == .canceled {
+            // ユーザーが Face ID シートを閉じたケース。案内は不要。
+            return
         } catch {
-            errorMessage = "Face ID でのログインに失敗しました。パスワードでも試してみてください。"
+            // credential 未登録 / タイムアウト / ネットワーク等はまとめて
+            // 「まずはパスワードで」の inline 案内に集約する。エラーの型で
+            // 細かく分岐しても正しく判定できないため、方針として単純化。
+            passkeyHint = "この端末にパスキーがまだ登録されていない可能性があります。下のパスワードでログインしてから、設定 > パスキーで登録できます。"
+            focused = .password
         }
     }
 }
