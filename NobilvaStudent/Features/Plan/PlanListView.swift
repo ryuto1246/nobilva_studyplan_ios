@@ -30,6 +30,13 @@ struct PlanListView: View {
     @State private var errorMessage: String?
     @State private var showAddTask = false
     @State private var editingTask: StudentTask?
+    @State private var consulting: ConsultingRequest?
+
+    /// `.sheet(item:)` 用の Identifiable wrapper。ChatTaskCard 自体は Hashable のみ。
+    private struct ConsultingRequest: Identifiable {
+        let id = UUID()
+        let card: ChatTaskCard
+    }
 
     private let today = JSTDate.todayString()
 
@@ -78,6 +85,10 @@ struct PlanListView: View {
                 TaskFormView(existing: task) { Task { await load() } }
                     .environmentObject(auth)
             }
+            .sheet(item: $consulting) { req in
+                TaskChatSheet(card: req.card)
+                    .environmentObject(auth)
+            }
             .errorAlert($errorMessage)
         }
     }
@@ -90,12 +101,12 @@ struct PlanListView: View {
             Card {
                 VStack(spacing: 0) {
                     ForEach(Array(unscheduledTasks.enumerated()), id: \.element.id) { i, task in
-                        Button {
-                            editingTask = task
-                        } label: {
-                            unscheduledRow(task)
-                        }
-                        .buttonStyle(.plain)
+                        // 行全体タップで編集シート、Button (相談) は自分の onTap を優先。
+                        // Button in Button だとインナー Button が反応しない iOS の仕様を避けるため
+                        // 外側は onTapGesture、内側は Button を使う。
+                        unscheduledRow(task)
+                            .contentShape(Rectangle())
+                            .onTapGesture { editingTask = task }
                         if i != unscheduledTasks.count - 1 { Divider() }
                     }
                 }
@@ -120,6 +131,17 @@ struct PlanListView: View {
                 }
             }
             Spacer()
+            Button {
+                consulting = ConsultingRequest(card: .fromTask(
+                    title: task.title, subject: task.subject, estimatedMinutes: task.estimatedMinutes))
+            } label: {
+                Image(systemName: "message")
+                    .font(.subheadline)
+                    .foregroundStyle(Theme.secondaryLabel)
+                    .frame(width: 28, height: 28)
+            }
+            .buttonStyle(.plain)
+            .accessibilityLabel("このタスクについて相談する")
             Image(systemName: "chevron.right")
                 .font(.caption)
                 .foregroundStyle(.tertiary)
@@ -195,7 +217,9 @@ struct PlanListView: View {
                             status: item.status,
                             prominent: false,
                             onToggle: { Task { await toggleItem(item) } },
-                            onStart: isToday ? { router.startTimer(with: item.id) } : nil
+                            onStart: isToday ? { router.startTimer(with: item.id) } : nil,
+                            onConsult: { consulting = ConsultingRequest(card: .fromPlanItem(
+                                title: item.title, subject: item.subject, durationMinutes: item.durationMinutes)) }
                         )
                         if item.id != sorted.last?.id { Divider() }
                     }
@@ -301,10 +325,26 @@ struct PlanListView: View {
 
     private func toggleItem(_ item: PlanItem) async {
         let next: PlanItemStatus = item.status == .completed ? .pending : .completed
+        // Optimistic update: 先に表示を切り替え、失敗時に snapshot へ戻す
+        let snapshot = dayEntries
+        dayEntries = dayEntries.map { entry in
+            guard case .day(let plan) = entry,
+                  plan.items.contains(where: { $0.id == item.id }) else { return entry }
+            let newItems = plan.items.map { i -> PlanItem in
+                guard i.id == item.id else { return i }
+                return PlanItem(
+                    id: i.id, planId: i.planId, taskId: i.taskId, goalId: i.goalId,
+                    title: i.title, subject: i.subject, startTime: i.startTime,
+                    durationMinutes: i.durationMinutes, status: next,
+                    rationale: i.rationale, sortOrder: i.sortOrder
+                )
+            }
+            return .day(PlanForDate(plan: plan.plan, items: newItems))
+        }
         do {
             try await PlanRepository(api: auth.api).setItemStatus(item.id, status: next)
-            await load()
         } catch {
+            dayEntries = snapshot
             errorMessage = "更新に失敗しました"
         }
     }
