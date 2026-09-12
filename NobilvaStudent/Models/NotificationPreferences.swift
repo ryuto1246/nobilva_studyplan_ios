@@ -10,6 +10,8 @@ struct NotificationPreferences: Codable, Hashable {
     let streakAlerts: Bool?
     let quietHoursStart: String?
     let quietHoursEnd: String?
+    let meetingReminders: Bool?
+    let meetingReminderMinutes: Int?
 
     enum CodingKeys: String, CodingKey {
         case morningReminder = "morning_reminder"
@@ -21,5 +23,7 @@ struct NotificationPreferences: Codable, Hashable {
         case streakAlerts = "streak_alerts"
         case quietHoursStart = "quiet_hours_start"
         case quietHoursEnd = "quiet_hours_end"
+        case meetingReminders = "meeting_reminders"
+        case meetingReminderMinutes = "meeting_reminder_minutes"
     }
 }

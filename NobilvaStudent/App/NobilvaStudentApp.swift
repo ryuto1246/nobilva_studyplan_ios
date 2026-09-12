@@ -2,6 +2,9 @@ import SwiftUI
 
 @main
 struct NobilvaStudentApp: App {
+    // APNs の didRegisterForRemoteNotificationsWithDeviceToken を受け取るため
+    // だけに UIApplicationDelegate を注入。他の SwiftUI ライフサイクルは触らない。
+    @UIApplicationDelegateAdaptor(AppDelegate.self) private var appDelegate
     @StateObject private var auth = AuthStore()
     @StateObject private var chatUnread = ChatUnreadStore()
     @StateObject private var router = AppRouter()

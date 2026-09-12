@@ -244,7 +244,7 @@ struct PomodoroSettingsView: View {
 
 struct NotificationsSettingsView: View {
     @EnvironmentObject var auth: AuthStore
-    @State private var prefs = NotificationPreferences(morningReminder: false, morningReminderTime: "07:30", planReminders: false, planReminderMinutes: 10, eveningSummary: false, eveningSummaryTime: "22:00", streakAlerts: false, quietHoursStart: nil, quietHoursEnd: nil)
+    @State private var prefs = NotificationPreferences(morningReminder: false, morningReminderTime: "07:30", planReminders: false, planReminderMinutes: 10, eveningSummary: false, eveningSummaryTime: "22:00", streakAlerts: false, quietHoursStart: nil, quietHoursEnd: nil, meetingReminders: true, meetingReminderMinutes: 30)
     @State private var isSaving = false
     @State private var errorMessage: String?
     @State private var savedFlag = false
@@ -256,6 +256,20 @@ struct NotificationsSettingsView: View {
                 Toggle("計画の直前リマインド", isOn: Binding(get: { prefs.planReminders ?? false }, set: { new in prefs = replace(prefs, planReminders: new) }))
                 Toggle("夜のサマリー", isOn: Binding(get: { prefs.eveningSummary ?? false }, set: { new in prefs = replace(prefs, eveningSummary: new) }))
                 Toggle("ストリーク切れ警告", isOn: Binding(get: { prefs.streakAlerts ?? false }, set: { new in prefs = replace(prefs, streakAlerts: new) }))
+            }
+            Section("面談・個別指導") {
+                Toggle("開始前に通知", isOn: Binding(
+                    get: { prefs.meetingReminders ?? true },
+                    set: { new in prefs = replace(prefs, meetingReminders: new) }
+                ))
+                if prefs.meetingReminders ?? true {
+                    Stepper(value: Binding(
+                        get: { prefs.meetingReminderMinutes ?? 30 },
+                        set: { new in prefs = replace(prefs, meetingReminderMinutes: new) }
+                    ), in: 0...240, step: 5) {
+                        Text("通知タイミング: \((prefs.meetingReminderMinutes ?? 30) == 0 ? "開始時" : "\(prefs.meetingReminderMinutes ?? 30) 分前")")
+                    }
+                }
             }
             Section {
                 Text("※ 通知はこの端末のプッシュ通知で届きます。iPhone の設定アプリで Nobilva の通知を許可しておいてください。")
@@ -278,7 +292,8 @@ struct NotificationsSettingsView: View {
 
     private func replace(_ p: NotificationPreferences,
                          morningReminder: Bool? = nil, planReminders: Bool? = nil,
-                         eveningSummary: Bool? = nil, streakAlerts: Bool? = nil) -> NotificationPreferences {
+                         eveningSummary: Bool? = nil, streakAlerts: Bool? = nil,
+                         meetingReminders: Bool? = nil, meetingReminderMinutes: Int? = nil) -> NotificationPreferences {
         NotificationPreferences(
             morningReminder: morningReminder ?? p.morningReminder,
             morningReminderTime: p.morningReminderTime,
@@ -288,7 +303,9 @@ struct NotificationsSettingsView: View {
             eveningSummaryTime: p.eveningSummaryTime,
             streakAlerts: streakAlerts ?? p.streakAlerts,
             quietHoursStart: p.quietHoursStart,
-            quietHoursEnd: p.quietHoursEnd
+            quietHoursEnd: p.quietHoursEnd,
+            meetingReminders: meetingReminders ?? p.meetingReminders,
+            meetingReminderMinutes: meetingReminderMinutes ?? p.meetingReminderMinutes
         )
     }
 
@@ -309,7 +326,9 @@ struct NotificationsSettingsView: View {
                 evening_summary_time: prefs.eveningSummaryTime,
                 streak_alerts: prefs.streakAlerts,
                 quiet_hours_start: prefs.quietHoursStart,
-                quiet_hours_end: prefs.quietHoursEnd
+                quiet_hours_end: prefs.quietHoursEnd,
+                meeting_reminders: prefs.meetingReminders,
+                meeting_reminder_minutes: prefs.meetingReminderMinutes
             ))
             savedFlag = true
         } catch let e as APIError { errorMessage = e.errorDescription }

@@ -33,6 +33,10 @@ final class AuthStore: ObservableObject, TokenProviding {
         self.api = api
         // nonisolated setter なので同期で確実に紐付けする。
         api.setTokenProvider(self)
+        // Push 通知の APNs トークンをサーバに登録するために APIClient を渡す。
+        // 未ログイン時に registerDeviceToken が来た場合は PushService 側で
+        // pendingTokenHex に保持され、attach 済みなら即送信される。
+        PushService.shared.attach(api: api)
     }
 
     // MARK: - Bootstrap
@@ -392,6 +396,9 @@ final class AuthStore: ObservableObject, TokenProviding {
     // MARK: - Logout
 
     func logout() async {
+        // 別ユーザーで再ログインしたときに前ユーザーの端末へ push が飛ばないよう、
+        // サーバ側の APNs トークン行を先に消してからセッション破棄する。
+        await PushService.shared.unregisterOnSignOut()
         // best-effort でサーバに DELETE。失敗しても続行。
         do {
             let _: EmptyResponse = try await api.delete("/api/v1/auth/mobile/session")

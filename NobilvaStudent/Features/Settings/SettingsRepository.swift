@@ -41,6 +41,8 @@ struct SettingsRepository {
         var streak_alerts: Bool?
         var quiet_hours_start: String?
         var quiet_hours_end: String?
+        var meeting_reminders: Bool?
+        var meeting_reminder_minutes: Int?
     }
 
     func patchNotifications(_ body: NotificationPatchBody) async throws {
