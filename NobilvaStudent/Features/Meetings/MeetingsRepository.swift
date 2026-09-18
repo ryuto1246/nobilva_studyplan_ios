@@ -57,4 +57,10 @@ struct MeetingsRepository {
     func rejectProposal(_ id: String, note: String?) async throws {
         let _: EmptyResponse = try await api.post("/api/v1/student/meetings/\(id)/proposal/reject", body: NoteBody(note: note))
     }
+
+    /// 自分が出したリスケ希望 / 提案を取り下げて state を "none" に戻す。
+    /// 相手が出したものは (student 権限では) 取り下げ不可 — サーバ側で 400 返す。
+    func withdrawReschedule(_ id: String) async throws {
+        let _: EmptyResponse = try await api.postVoid("/api/v1/student/meetings/\(id)/reschedule-request/withdraw")
+    }
 }

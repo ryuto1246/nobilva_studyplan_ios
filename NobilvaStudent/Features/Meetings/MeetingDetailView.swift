@@ -1,5 +1,16 @@
 import SwiftUI
 
+/// リスケフローの "現在の状況 × 自分" を 5 相に切り分ける。UI 側はこの phase を
+/// 見て「あなたが次に何をすべきか」を出し分ける。Web 版 MeetingDetailView.tsx
+/// の computePhase と同じ規約。
+private enum ReschedulePhase {
+    case none                 // 予定通り、誰も動いていない
+    case requestedByMe        // 自分が「変えたい」希望を送った (相手待ち)
+    case requestedByOther     // 相手が希望を送ってきた (自分が具体提案する番)
+    case proposedByMe         // 自分が具体日時を提案した (相手待ち)
+    case proposedByOther      // 相手が具体日時を提案してきた (承認/対案/見送る)
+}
+
 struct MeetingDetailView: View {
     @EnvironmentObject var auth: AuthStore
     let meetingId: String
@@ -10,9 +21,21 @@ struct MeetingDetailView: View {
 
     // action state
     @State private var showCancelConfirm = false
-    @State private var showRescheduleSheet = false
+    @State private var showRequestSheet = false
     @State private var showProposalSheet = false
     @State private var busy = false
+
+    private var currentUserId: String? { auth.currentUser?.id }
+
+    private var phase: ReschedulePhase {
+        guard let m = meeting else { return .none }
+        let iAmActor = m.rescheduleActor != nil && m.rescheduleActor == currentUserId
+        switch m.rescheduleState {
+        case .requested: return iAmActor ? .requestedByMe : .requestedByOther
+        case .proposed: return iAmActor ? .proposedByMe : .proposedByOther
+        case .none: return .none
+        }
+    }
 
     var body: some View {
         ScrollView {
@@ -34,10 +57,24 @@ struct MeetingDetailView: View {
                             }
                         }
                     }
-                    if let proposed = m.proposedStartAt, let d = JSTDate.parseTimestamp(proposed), m.rescheduleState == .proposed {
-                        proposalCard(start: d, note: m.rescheduleNote)
+
+                    // phase != .none の時だけ状況パネル (混在ボタン回避)
+                    if phase != .none && m.status == .scheduled && !m.isPast {
+                        reschedulePanel(m)
                     }
-                    actionsSection(m)
+
+                    // NONE 時だけ通常アクションバー
+                    if phase == .none && m.status == .scheduled && !m.isPast {
+                        VStack(spacing: 10) {
+                            Button {
+                                showRequestSheet = true
+                            } label: {
+                                Label("リスケを希望する", systemImage: "arrow.triangle.2.circlepath")
+                                    .frame(maxWidth: .infinity)
+                            }
+                            .buttonStyle(.bordered)
+                        }
+                    }
                 }
             }
             .padding(20)
@@ -52,8 +89,12 @@ struct MeetingDetailView: View {
         .confirmationDialog("この面談をキャンセルしますか？", isPresented: $showCancelConfirm, titleVisibility: .visible) {
             Button("キャンセルする", role: .destructive) { Task { await cancel() } }
         }
-        .sheet(isPresented: $showRescheduleSheet) {
-            NoteSheet(title: "リスケ希望を送る") { note in Task { await requestReschedule(note: note) } }
+        .sheet(isPresented: $showRequestSheet) {
+            NoteSheet(title: "リスケ希望を送る",
+                      description: "相手に「日程を変えたい」ことを伝えます。新しい日時は相手が提案します。",
+                      requireNote: true) { note in
+                Task { await requestReschedule(note: note) }
+            }
         }
         .sheet(isPresented: $showProposalSheet) {
             ProposalSheet { start, duration, note in
@@ -82,48 +123,128 @@ struct MeetingDetailView: View {
         }
     }
 
-    private func proposalCard(start: Date, note: String?) -> some View {
+    /// リスケ状況パネル。phase に応じて「今の状況」+「あなたが次にすべきこと」+
+    /// アクションボタンをまとめて出す。混在ボタン回避のため他の通常アクション
+    /// (リスケ希望を送る) は phase == .none のときだけ外側に出す。
+    @ViewBuilder
+    private func reschedulePanel(_ m: Meeting) -> some View {
         Card {
-            VStack(alignment: .leading, spacing: 8) {
-                Text("講師から新しい日時が提案されています")
-                    .font(.subheadline).bold().foregroundStyle(.orange)
-                Text(JSTDate.displayLong.string(from: start) + " " + JSTDate.time.string(from: start))
-                    .font(.subheadline)
-                if let note, !note.isEmpty {
-                    Text(note).font(.caption).foregroundStyle(.secondary)
+            VStack(alignment: .leading, spacing: 12) {
+                HStack(alignment: .top, spacing: 8) {
+                    Image(systemName: "info.circle.fill")
+                        .foregroundStyle(.orange)
+                    VStack(alignment: .leading, spacing: 4) {
+                        Text(phaseTitle).font(.subheadline).bold()
+                        Text(phaseHint).font(.caption).foregroundStyle(.secondary)
+                    }
                 }
-                HStack {
-                    Button {
-                        Task { await acceptProposal() }
-                    } label: { Text("受け入れる").frame(maxWidth: .infinity) }
-                    .buttonStyle(.borderedProminent)
-                    .disabled(busy)
-                    Button {
-                        Task { await rejectProposal() }
-                    } label: { Text("拒否する").frame(maxWidth: .infinity) }
-                    .buttonStyle(.bordered)
-                    .disabled(busy)
+
+                // 提案されている日時 (proposed 時のみ)
+                if let proposed = m.proposedStartAt,
+                   let d = JSTDate.parseTimestamp(proposed),
+                   (phase == .proposedByMe || phase == .proposedByOther) {
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text("提案されている日時").font(.caption).foregroundStyle(.secondary)
+                        Text(JSTDate.displayLong.string(from: d) + " " + JSTDate.time.string(from: d))
+                            .font(.subheadline)
+                    }
+                    .padding(10)
+                    .background(RoundedRectangle(cornerRadius: 8).fill(Color(uiColor: .secondarySystemBackground)))
                 }
+
+                if let note = m.rescheduleNote, !note.isEmpty {
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text("相手のメモ").font(.caption).foregroundStyle(.secondary)
+                        Text(note).font(.subheadline)
+                    }
+                    .padding(10)
+                    .background(RoundedRectangle(cornerRadius: 8).fill(Color(uiColor: .secondarySystemBackground)))
+                }
+
+                phaseActions
             }
         }
     }
 
-    private func actionsSection(_ m: Meeting) -> some View {
-        VStack(spacing: 10) {
-            if m.status == .scheduled && !m.isPast {
-                Button {
-                    showRescheduleSheet = true
-                } label: { Label("リスケを希望する", systemImage: "arrow.triangle.2.circlepath").frame(maxWidth: .infinity) }
-                    .buttonStyle(.bordered)
+    private var phaseTitle: String {
+        switch phase {
+        case .requestedByMe: return "リスケ希望を送信しました"
+        case .requestedByOther: return "相手からリスケ希望が届いています"
+        case .proposedByMe: return "新しい日程を提案しました"
+        case .proposedByOther: return "新しい日程が提案されています"
+        case .none: return ""
+        }
+    }
+
+    private var phaseHint: String {
+        switch phase {
+        case .requestedByMe, .proposedByMe: return "相手の返答を待っています。"
+        case .requestedByOther: return "あなたのすべきこと: 新しい日程を提案してください。"
+        case .proposedByOther: return "あなたのすべきこと: 承認・別日を提案・見送る のいずれかを選んでください。"
+        case .none: return ""
+        }
+    }
+
+    @ViewBuilder
+    private var phaseActions: some View {
+        switch phase {
+        case .requestedByOther:
+            VStack(spacing: 8) {
                 Button {
                     showProposalSheet = true
-                } label: { Label("別日時を提案する", systemImage: "calendar.badge.plus").frame(maxWidth: .infinity) }
-                    .buttonStyle(.bordered)
-                Button(role: .destructive) {
-                    showCancelConfirm = true
-                } label: { Label("この面談をキャンセル", systemImage: "xmark.circle").frame(maxWidth: .infinity) }
-                    .buttonStyle(.bordered)
+                } label: {
+                    Label("新しい日程を提案する", systemImage: "calendar.badge.plus")
+                        .frame(maxWidth: .infinity)
+                }
+                .buttonStyle(.borderedProminent)
+                .disabled(busy)
+                Button {
+                    Task { await withdraw() }
+                } label: {
+                    Label("希望を取り下げる", systemImage: "arrow.uturn.backward")
+                        .frame(maxWidth: .infinity)
+                }
+                .buttonStyle(.bordered)
+                .disabled(busy)
             }
+        case .proposedByOther:
+            VStack(spacing: 8) {
+                Button {
+                    Task { await acceptProposal() }
+                } label: {
+                    Label("この日時で承認", systemImage: "checkmark.circle.fill")
+                        .frame(maxWidth: .infinity)
+                }
+                .buttonStyle(.borderedProminent)
+                .disabled(busy)
+                Button {
+                    showProposalSheet = true
+                } label: {
+                    Label("別の日を提案", systemImage: "calendar.badge.plus")
+                        .frame(maxWidth: .infinity)
+                }
+                .buttonStyle(.bordered)
+                .disabled(busy)
+                Button(role: .destructive) {
+                    Task { await rejectProposal() }
+                } label: {
+                    Label("見送る (相手に返す)", systemImage: "arrow.uturn.backward")
+                        .frame(maxWidth: .infinity)
+                }
+                .buttonStyle(.bordered)
+                .disabled(busy)
+            }
+        case .requestedByMe, .proposedByMe:
+            Button {
+                Task { await withdraw() }
+            } label: {
+                Label("取り下げる", systemImage: "arrow.uturn.backward")
+                    .frame(maxWidth: .infinity)
+            }
+            .buttonStyle(.bordered)
+            .disabled(busy)
+        case .none:
+            EmptyView()
         }
     }
 
@@ -170,6 +291,13 @@ struct MeetingDetailView: View {
         catch let e as APIError { errorMessage = e.errorDescription }
         catch { errorMessage = "処理に失敗しました" }
     }
+
+    private func withdraw() async {
+        busy = true; defer { busy = false }
+        do { try await MeetingsRepository(api: auth.api).withdrawReschedule(meetingId); await load() }
+        catch let e as APIError { errorMessage = e.errorDescription }
+        catch { errorMessage = "取り下げに失敗しました" }
+    }
 }
 
 // MARK: - Sheets
@@ -177,14 +305,37 @@ struct MeetingDetailView: View {
 private struct NoteSheet: View {
     @Environment(\.dismiss) var dismiss
     let title: String
+    let description: String?
+    /// true のときはメモが空だと送信不可 (リスケ希望など理由必須のケース向け)
+    let requireNote: Bool
     let onSubmit: (String?) -> Void
 
     @State private var note: String = ""
+
+    init(
+        title: String,
+        description: String? = nil,
+        requireNote: Bool = false,
+        onSubmit: @escaping (String?) -> Void,
+    ) {
+        self.title = title
+        self.description = description
+        self.requireNote = requireNote
+        self.onSubmit = onSubmit
+    }
+
     var body: some View {
         NavigationStack {
             Form {
-                Section("メッセージ (任意)") {
-                    TextField("メッセージ", text: $note, axis: .vertical).lineLimit(2...6)
+                if let description {
+                    Section {
+                        Text(description).font(.footnote).foregroundStyle(.secondary)
+                    }
+                }
+                Section(requireNote ? "理由" : "メッセージ (任意)") {
+                    TextField(requireNote ? "例: 塾があるので別の日にしたい" : "メッセージ",
+                              text: $note, axis: .vertical)
+                        .lineLimit(2...6)
                 }
                 Section {
                     Button {
@@ -192,6 +343,7 @@ private struct NoteSheet: View {
                         dismiss()
                     } label: { Text("送信").bold().frame(maxWidth: .infinity) }
                     .buttonStyle(.borderedProminent)
+                    .disabled(requireNote && note.trimmingCharacters(in: .whitespaces).isEmpty)
                 }
             }
             .navigationTitle(title)
@@ -230,7 +382,7 @@ private struct ProposalSheet: View {
                     .buttonStyle(.borderedProminent)
                 }
             }
-            .navigationTitle("別日時を提案")
+            .navigationTitle("日程を提案")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
                 ToolbarItem(placement: .topBarLeading) { Button("キャンセル") { dismiss() } }
