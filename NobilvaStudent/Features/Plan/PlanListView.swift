@@ -117,7 +117,8 @@ struct PlanListView: View {
             Circle().fill(Theme.subjectColor(task.subject)).frame(width: 8, height: 8).padding(.top, 6)
             VStack(alignment: .leading, spacing: 2) {
                 Text(task.title)
-                    .foregroundStyle(Color.primary)
+                    .strikethrough(task.status == .completed)
+                    .foregroundStyle(task.status == .completed ? Theme.secondaryLabel : Color.primary)
                 HStack(spacing: 8) {
                     if !task.subject.isEmpty {
                         Text(task.subject).font(.caption).foregroundStyle(.secondary)
@@ -129,20 +130,44 @@ struct PlanListView: View {
                 }
             }
             Spacer()
-            Button {
-                consulting = ConsultingRequest(card: .fromTask(
-                    title: task.title, subject: task.subject, estimatedMinutes: task.estimatedMinutes))
-            } label: {
-                Image(systemName: "message")
-                    .font(.subheadline)
-                    .foregroundStyle(Theme.secondaryLabel)
-                    .frame(width: 28, height: 28)
+            HStack(spacing: 8) {
+                // 取り組む: PlanItem 未紐付なので router.openTimer() (preselect なし)。
+                // Timer 側で必要なら手動 selectedItemId を選ぶ。
+                if task.status != .completed {
+                    Button {
+                        router.openTimer()
+                    } label: {
+                        Image(systemName: "play.fill")
+                            .frame(width: 28, height: 28)
+                    }
+                    .buttonStyle(.borderedProminent)
+                    .buttonBorderShape(.circle)
+                    .controlSize(.small)
+                    .accessibilityLabel("このタスクに取り組む")
+                }
+                // 相談する
+                Button {
+                    consulting = ConsultingRequest(card: .fromTask(
+                        title: task.title, subject: task.subject, estimatedMinutes: task.estimatedMinutes))
+                } label: {
+                    Image(systemName: "message")
+                        .font(.subheadline)
+                        .foregroundStyle(Theme.secondaryLabel)
+                        .frame(width: 28, height: 28)
+                }
+                .buttonStyle(.plain)
+                .accessibilityLabel("このタスクについて相談する")
+                // 完了トグル: setStatus API で pending ↔ completed
+                Button {
+                    Task { await toggleUnscheduled(task) }
+                } label: {
+                    Image(systemName: task.status == .completed ? "checkmark.circle.fill" : "circle")
+                        .font(.title3)
+                        .foregroundStyle(task.status == .completed ? Theme.accent : Theme.secondaryLabel)
+                }
+                .buttonStyle(.plain)
+                .accessibilityLabel(task.status == .completed ? "完了を取り消す" : "完了にする")
             }
-            .buttonStyle(.plain)
-            .accessibilityLabel("このタスクについて相談する")
-            Image(systemName: "chevron.right")
-                .font(.caption)
-                .foregroundStyle(.tertiary)
         }
         .padding(.vertical, 8)
     }
@@ -215,7 +240,9 @@ struct PlanListView: View {
                             status: item.status,
                             prominent: false,
                             onToggle: { Task { await toggleItem(item) } },
-                            onStart: isToday ? { router.startTimer(with: item.id) } : nil,
+                            // 未来の日は "先取りで取り組む" のは実運用上まれ + 誤タップ
+                            // 事故が痛いので隠す。今日以前は catch-up も含めて許可。
+                            onStart: dateStr <= today ? { router.startTimer(with: item.id) } : nil,
                             onConsult: { consulting = ConsultingRequest(card: .fromPlanItem(
                                 title: item.title, subject: item.subject, durationMinutes: item.durationMinutes)) }
                         )
@@ -341,6 +368,37 @@ struct PlanListView: View {
             try await PlanRepository(api: auth.api).setItemStatus(item.id, status: next)
         } catch {
             dayEntries = snapshot
+            errorMessage = "更新に失敗しました"
+        }
+    }
+
+    /// 未日付タスクの完了トグル。tasks/{id}/status を叩き、完了になったら
+    /// 一覧から消す (pendingTasks から外す)。取り消しは pending へ戻す。
+    private func toggleUnscheduled(_ task: StudentTask) async {
+        let next: TaskStatus = task.status == .completed ? .pending : .completed
+        let snapshot = unscheduledTasks
+        // Optimistic: 完了なら消す、pending 復帰なら status 更新
+        if next == .completed {
+            unscheduledTasks = unscheduledTasks.filter { $0.id != task.id }
+        } else {
+            unscheduledTasks = unscheduledTasks.map { t in
+                guard t.id == task.id else { return t }
+                return StudentTask(
+                    id: t.id, studentId: t.studentId, title: t.title, subject: t.subject,
+                    estimatedMinutes: t.estimatedMinutes, status: next,
+                    dueDate: t.dueDate, scheduledDate: t.scheduledDate,
+                    unitCount: t.unitCount, unitLabel: t.unitLabel,
+                    goalId: t.goalId, recurrence: t.recurrence,
+                    recurrenceWeekday: t.recurrenceWeekday,
+                    preferredTimeOfDay: t.preferredTimeOfDay, notes: t.notes,
+                    createdAt: t.createdAt,
+                )
+            }
+        }
+        do {
+            try await TasksRepository(api: auth.api).setStatus(task.id, status: next)
+        } catch {
+            unscheduledTasks = snapshot
             errorMessage = "更新に失敗しました"
         }
     }

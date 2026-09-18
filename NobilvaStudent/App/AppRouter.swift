@@ -15,4 +15,11 @@ final class AppRouter: ObservableObject {
         timerPreselectedPlanItemId = planItemId
         timerPresented = true
     }
+
+    /// PlanItem に紐付かない「取り組む」用。未日付タスクからのショートカット。
+    /// Timer sheet が開いた後、ユーザが必要なら手動で今日の item を選択する。
+    func openTimer() {
+        timerPreselectedPlanItemId = nil
+        timerPresented = true
+    }
 }
