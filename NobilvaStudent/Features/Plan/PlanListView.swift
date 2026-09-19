@@ -99,77 +99,30 @@ struct PlanListView: View {
             Card {
                 VStack(spacing: 0) {
                     ForEach(Array(unscheduledTasks.enumerated()), id: \.element.id) { i, task in
-                        // 行全体タップで編集シート、Button (相談) は自分の onTap を優先。
-                        // Button in Button だとインナー Button が反応しない iOS の仕様を避けるため
-                        // 外側は onTapGesture、内側は Button を使う。
-                        unscheduledRow(task)
-                            .contentShape(Rectangle())
-                            .onTapGesture { editingTask = task }
+                        // 行全体タップで編集シート。TodoRow 内の Button (完了/
+                        // チャット/取り組む) は自身の onTap を優先する (Button in
+                        // 外側 onTapGesture パターン)。
+                        TodoRow(
+                            title: task.title,
+                            subject: task.subject,
+                            durationMinutes: task.estimatedMinutes,
+                            dueDate: task.dueDate,
+                            taskStatus: task.status,
+                            onToggle: { Task { await toggleUnscheduled(task) } },
+                            onStart: { router.openTimer() },
+                            onConsult: {
+                                consulting = ConsultingRequest(card: .fromTask(
+                                    title: task.title, subject: task.subject,
+                                    estimatedMinutes: task.estimatedMinutes))
+                            }
+                        )
+                        .contentShape(Rectangle())
+                        .onTapGesture { editingTask = task }
                         if i != unscheduledTasks.count - 1 { Divider() }
                     }
                 }
             }
         }
-    }
-
-    private func unscheduledRow(_ task: StudentTask) -> some View {
-        HStack(alignment: .top, spacing: 10) {
-            Circle().fill(Theme.subjectColor(task.subject)).frame(width: 8, height: 8).padding(.top, 6)
-            VStack(alignment: .leading, spacing: 2) {
-                Text(task.title)
-                    .strikethrough(task.status == .completed)
-                    .foregroundStyle(task.status == .completed ? Theme.secondaryLabel : Color.primary)
-                HStack(spacing: 8) {
-                    if !task.subject.isEmpty {
-                        Text(task.subject).font(.caption).foregroundStyle(.secondary)
-                    }
-                    if let due = task.dueDate {
-                        Text("期限 \(due)").font(.caption).foregroundStyle(.secondary)
-                    }
-                    Text("\(task.estimatedMinutes)分").font(.caption).foregroundStyle(.tertiary)
-                }
-            }
-            Spacer()
-            HStack(spacing: 8) {
-                // 取り組む: PlanItem 未紐付なので router.openTimer() (preselect なし)。
-                // Timer 側で必要なら手動 selectedItemId を選ぶ。
-                if task.status != .completed {
-                    Button {
-                        router.openTimer()
-                    } label: {
-                        Image(systemName: "play.fill")
-                            .frame(width: 28, height: 28)
-                    }
-                    .buttonStyle(.borderedProminent)
-                    .buttonBorderShape(.circle)
-                    .controlSize(.small)
-                    .accessibilityLabel("このタスクに取り組む")
-                }
-                // 相談する
-                Button {
-                    consulting = ConsultingRequest(card: .fromTask(
-                        title: task.title, subject: task.subject, estimatedMinutes: task.estimatedMinutes))
-                } label: {
-                    Image(systemName: "message")
-                        .font(.subheadline)
-                        .foregroundStyle(Theme.secondaryLabel)
-                        .frame(width: 28, height: 28)
-                }
-                .buttonStyle(.plain)
-                .accessibilityLabel("このタスクについて相談する")
-                // 完了トグル: setStatus API で pending ↔ completed
-                Button {
-                    Task { await toggleUnscheduled(task) }
-                } label: {
-                    Image(systemName: task.status == .completed ? "checkmark.circle.fill" : "circle")
-                        .font(.title3)
-                        .foregroundStyle(task.status == .completed ? Theme.accent : Theme.secondaryLabel)
-                }
-                .buttonStyle(.plain)
-                .accessibilityLabel(task.status == .completed ? "完了を取り消す" : "完了にする")
-            }
-        }
-        .padding(.vertical, 8)
     }
 
     // MARK: - Days
@@ -391,7 +344,7 @@ struct PlanListView: View {
                     goalId: t.goalId, recurrence: t.recurrence,
                     recurrenceWeekday: t.recurrenceWeekday,
                     preferredTimeOfDay: t.preferredTimeOfDay, notes: t.notes,
-                    createdAt: t.createdAt,
+                    createdAt: t.createdAt
                 )
             }
         }

@@ -25,4 +25,13 @@ struct DashboardRepository {
             body: StatusBody(status: status.rawValue)
         )
     }
+
+    /// StudentTask のステータス更新 (期限切れタスクの完了トグル用)。
+    /// plan_items ではなく tasks テーブル側の status を直接更新する。
+    func setTaskStatus(_ id: String, status: TaskStatus) async throws {
+        let _: EmptyResponse = try await api.patch(
+            "/api/v1/student/tasks/\(id)/status",
+            body: StatusBody(status: status.rawValue)
+        )
+    }
 }

@@ -96,6 +96,30 @@ final class DashboardViewModel: ObservableObject {
         }
     }
 
+    /// 期限切れタスクの完了トグル。完了になったら overdueTasks から消し、
+    /// pending 復帰なら status 差し替えのみ。API は tasks/{id}/status。
+    func toggleOverdueTask(_ task: StudentTask) async {
+        guard let repo else { return }
+        let next: TaskStatus = task.status == .completed ? .pending : .completed
+        if case .loaded(var summary) = state {
+            summary = mutate(summary) { s in
+                if next == .completed {
+                    s = replacingOverdue(s, tasks: s.overdueTasks.filter { $0.id != task.id })
+                } else {
+                    s = replacingOverdue(s, tasks: s.overdueTasks.map { t in
+                        t.id == task.id ? replacingTaskStatus(t, with: next) : t
+                    })
+                }
+            }
+            state = .loaded(summary)
+        }
+        do {
+            try await repo.setTaskStatus(task.id, status: next)
+        } catch {
+            await load()
+        }
+    }
+
     // MARK: - private helpers
 
     private func mutate<T>(_ v: T, _ f: (inout T) -> Void) -> T {
@@ -134,6 +158,31 @@ final class DashboardViewModel: ObservableObject {
             chatPartners: s.chatPartners,
             busySlots: s.busySlots,
             upcomingMeeting: s.upcomingMeeting
+        )
+    }
+
+    private func replacingOverdue(_ s: DashboardSummary, tasks: [StudentTask]) -> DashboardSummary {
+        DashboardSummary(
+            profile: s.profile,
+            today: s.today,
+            tomorrow: s.tomorrow,
+            overdueTasks: tasks,
+            chatPartners: s.chatPartners,
+            busySlots: s.busySlots,
+            upcomingMeeting: s.upcomingMeeting
+        )
+    }
+
+    private func replacingTaskStatus(_ t: StudentTask, with status: TaskStatus) -> StudentTask {
+        StudentTask(
+            id: t.id, studentId: t.studentId, title: t.title, subject: t.subject,
+            estimatedMinutes: t.estimatedMinutes, status: status,
+            dueDate: t.dueDate, scheduledDate: t.scheduledDate,
+            unitCount: t.unitCount, unitLabel: t.unitLabel,
+            goalId: t.goalId, recurrence: t.recurrence,
+            recurrenceWeekday: t.recurrenceWeekday,
+            preferredTimeOfDay: t.preferredTimeOfDay, notes: t.notes,
+            createdAt: t.createdAt
         )
     }
 }

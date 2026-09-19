@@ -199,28 +199,20 @@ struct DashboardView: View {
                 Card {
                     VStack(alignment: .leading, spacing: 0) {
                         ForEach(Array(s.overdueTasks.enumerated()), id: \.element.id) { i, t in
-                            HStack(alignment: .top, spacing: 10) {
-                                Circle().fill(Theme.subjectColor(t.subject)).frame(width: 8, height: 8).padding(.top, 6)
-                                VStack(alignment: .leading, spacing: 2) {
-                                    Text(t.title)
-                                    if let due = t.dueDate {
-                                        Text("期限: \(due)").font(.caption).foregroundStyle(.red)
-                                    }
-                                }
-                                Spacer()
-                                Button {
+                            TodoRow(
+                                title: t.title,
+                                subject: t.subject,
+                                durationMinutes: t.estimatedMinutes,
+                                dueDate: t.dueDate,
+                                taskStatus: t.status,
+                                onToggle: { Task { await vm.toggleOverdueTask(t) } },
+                                onStart: { router.openTimer() },
+                                onConsult: {
                                     consulting = ConsultingRequest(card: .fromTask(
-                                        title: t.title, subject: t.subject, estimatedMinutes: t.estimatedMinutes))
-                                } label: {
-                                    Image(systemName: "message")
-                                        .font(.subheadline)
-                                        .foregroundStyle(Theme.secondaryLabel)
-                                        .frame(width: 28, height: 28)
+                                        title: t.title, subject: t.subject,
+                                        estimatedMinutes: t.estimatedMinutes))
                                 }
-                                .buttonStyle(.plain)
-                                .accessibilityLabel("このタスクについて相談する")
-                            }
-                            .padding(.vertical, 6)
+                            )
                             if i != s.overdueTasks.count - 1 { Divider() }
                         }
                     }
