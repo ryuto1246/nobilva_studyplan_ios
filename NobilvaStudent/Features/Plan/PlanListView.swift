@@ -31,6 +31,8 @@ struct PlanListView: View {
     @State private var showAddTask = false
     @State private var editingTask: StudentTask?
     @State private var consulting: ConsultingRequest?
+    /// 全完了の過去日はデフォルト折り畳み。ここに入っている planDate は展開表示する。
+    @State private var expandedCompleted: Set<String> = []
 
     /// `.sheet(item:)` 用の Identifiable wrapper。ChatTaskCard 自体は Hashable のみ。
     private struct ConsultingRequest: Identifiable {
@@ -173,33 +175,55 @@ struct PlanListView: View {
     private func dayCardFilled(_ plan: PlanForDate) -> some View {
         let dateStr = plan.plan?.planDate ?? ""
         let isToday = dateStr == today
+        let completed = plan.items.filter { $0.status == .completed }.count
+        let total = plan.items.count
+        // 今日は「今やること」が見えている必要があるので常に展開。それ以外の
+        // 全完了日は折り畳みがデフォルトで、ヘッダータップでトグル。
+        let isFullyCompleted = total > 0 && completed == total
+        let collapsible = isFullyCompleted && !isToday
+        let showCompact = collapsible && !expandedCompleted.contains(dateStr)
         return Card {
-            VStack(alignment: .leading, spacing: 10) {
+            VStack(alignment: .leading, spacing: showCompact ? 0 : 10) {
                 dayHeader(date: dateStr, isToday: isToday,
-                          completed: plan.items.filter { $0.status == .completed }.count,
-                          total: plan.items.count)
-                if plan.items.isEmpty {
-                    Text("この日の計画はありません")
-                        .font(.subheadline)
-                        .foregroundStyle(.secondary)
-                } else {
-                    let sorted = plan.items.sorted { $0.sortOrder < $1.sortOrder }
-                    ForEach(sorted) { item in
-                        TodoRow(
-                            title: item.title,
-                            subject: item.subject,
-                            startTime: item.startTime,
-                            durationMinutes: item.durationMinutes,
-                            status: item.status,
-                            prominent: false,
-                            onToggle: { Task { await toggleItem(item) } },
-                            // 未来の日は "先取りで取り組む" のは実運用上まれ + 誤タップ
-                            // 事故が痛いので隠す。今日以前は catch-up も含めて許可。
-                            onStart: dateStr <= today ? { router.startTimer(with: item.id) } : nil,
-                            onConsult: { consulting = ConsultingRequest(card: .fromPlanItem(
-                                title: item.title, subject: item.subject, durationMinutes: item.durationMinutes)) }
-                        )
-                        if item.id != sorted.last?.id { Divider() }
+                          completed: completed, total: total,
+                          compactCompleted: showCompact,
+                          collapsible: collapsible,
+                          expanded: !showCompact)
+                    .contentShape(Rectangle())
+                    .onTapGesture {
+                        guard collapsible else { return }
+                        withAnimation(.easeInOut(duration: 0.2)) {
+                            if expandedCompleted.contains(dateStr) {
+                                expandedCompleted.remove(dateStr)
+                            } else {
+                                expandedCompleted.insert(dateStr)
+                            }
+                        }
+                    }
+                if !showCompact {
+                    if plan.items.isEmpty {
+                        Text("この日の計画はありません")
+                            .font(.subheadline)
+                            .foregroundStyle(.secondary)
+                    } else {
+                        let sorted = plan.items.sorted { $0.sortOrder < $1.sortOrder }
+                        ForEach(sorted) { item in
+                            TodoRow(
+                                title: item.title,
+                                subject: item.subject,
+                                startTime: item.startTime,
+                                durationMinutes: item.durationMinutes,
+                                status: item.status,
+                                prominent: false,
+                                onToggle: { Task { await toggleItem(item) } },
+                                // 未来の日は "先取りで取り組む" のは実運用上まれ + 誤タップ
+                                // 事故が痛いので隠す。今日以前は catch-up も含めて許可。
+                                onStart: dateStr <= today ? { router.startTimer(with: item.id) } : nil,
+                                onConsult: { consulting = ConsultingRequest(card: .fromPlanItem(
+                                    title: item.title, subject: item.subject, durationMinutes: item.durationMinutes)) }
+                            )
+                            if item.id != sorted.last?.id { Divider() }
+                        }
                     }
                 }
             }
@@ -215,7 +239,8 @@ struct PlanListView: View {
     private func dayCardEmpty(date: String, isToday: Bool) -> some View {
         Card {
             VStack(alignment: .leading, spacing: 10) {
-                dayHeader(date: date, isToday: isToday, completed: 0, total: 0)
+                dayHeader(date: date, isToday: isToday, completed: 0, total: 0,
+                          compactCompleted: false, collapsible: false, expanded: true)
                 Text(isToday ? "今日はまだ計画がありません" : "この日の計画はありません")
                     .font(.subheadline)
                     .foregroundStyle(.secondary)
@@ -229,13 +254,14 @@ struct PlanListView: View {
         }
     }
 
-    private func dayHeader(date: String, isToday: Bool, completed: Int, total: Int) -> some View {
+    private func dayHeader(date: String, isToday: Bool, completed: Int, total: Int,
+                           compactCompleted: Bool, collapsible: Bool, expanded: Bool) -> some View {
         let d = JSTDate.date(from: date) ?? Date()
         let label = JSTDate.displayShort.string(from: d)
         return HStack(alignment: .firstTextBaseline, spacing: 8) {
             Text(label)
                 .font(.headline)
-                .foregroundStyle(isToday ? Theme.accent : Color.primary)
+                .foregroundStyle(isToday ? Theme.accent : (compactCompleted ? Theme.secondaryLabel : Color.primary))
             if isToday {
                 Text("今日")
                     .font(.caption).bold()
@@ -245,10 +271,23 @@ struct PlanListView: View {
                     .clipShape(Capsule())
             }
             Spacer()
-            if total > 0 {
+            if compactCompleted {
+                HStack(spacing: 4) {
+                    Image(systemName: "checkmark.circle.fill")
+                    Text("全 \(total) 件完了")
+                        .font(.caption)
+                }
+                .foregroundStyle(.secondary)
+            } else if total > 0 {
                 Text("\(completed) / \(total)")
                     .font(.caption).monospacedDigit()
                     .foregroundStyle(.secondary)
+            }
+            if collapsible {
+                Image(systemName: "chevron.down")
+                    .font(.caption2.weight(.semibold))
+                    .foregroundStyle(.tertiary)
+                    .rotationEffect(.degrees(expanded ? 180 : 0))
             }
         }
     }
