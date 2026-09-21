@@ -28,8 +28,10 @@ final class DashboardViewModel: ObservableObject {
     }
 
     func loadIfNeeded() async {
-        if case .loaded = state { return }
-        // まずキャッシュがあれば即座に表示 (loading 状態をスキップ)
+        // SWR: キャッシュがあれば即座に表示 → 常に再取得。
+        // タブ切替で View が再表示された時に古いキャッシュが残り続けるのを防ぐ
+        // (以前は `.loaded` で早期 return していたため、Plan タブで作った計画が
+        //  ホームに反映されずリロード必須になっていた)。
         if case .idle = state, let cached = DashboardRepository.cachedSummary() {
             state = .loaded(cached)
         }

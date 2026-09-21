@@ -69,10 +69,11 @@ struct DashboardView: View {
         ScrollView {
             VStack(alignment: .leading, spacing: 20) {
                 heroSection(s)
-                if let m = s.upcomingMeeting { upcomingMeetingCard(m) }
+                if let m = s.upcomingMeeting, !m.isPast {
+                    upcomingMeetingCard(m)
+                }
                 overdueSection(s)
                 todayOrTomorrowSection(s)
-                planEntryLink(s)
                 busySlotsSection(s)
             }
             .padding(.horizontal, 20)
@@ -141,7 +142,8 @@ struct DashboardView: View {
             let remain = todayItems.count - doneToday
             return "今日の計画はあと \(remain) 件。1つずつ片付けよう。"
         }
-        if let m = s.upcomingMeeting, let start = JSTDate.parseTimestamp(m.scheduledStartAt) {
+        if let m = s.upcomingMeeting, !m.isPast,
+           let start = JSTDate.parseTimestamp(m.scheduledStartAt) {
             let df = DateFormatter()
             df.locale = Locale(identifier: "ja_JP")
             df.dateFormat = "M/d(E) HH:mm"
@@ -345,26 +347,4 @@ struct DashboardView: View {
         let card: ChatTaskCard
     }
 
-    private func planEntryLink(_ s: DashboardSummary) -> some View {
-        NavigationLink {
-            MeetingListView()
-                .environmentObject(auth)
-        } label: {
-            HStack(spacing: 10) {
-                Image(systemName: "calendar.badge.clock")
-                Text("面談一覧を見る").font(.body.weight(.semibold))
-                Spacer()
-                Image(systemName: "chevron.right")
-                    .font(.caption.weight(.semibold))
-                    .foregroundStyle(.tertiary)
-            }
-            .padding(.horizontal, 16)
-            .padding(.vertical, 14)
-            .frame(maxWidth: .infinity, alignment: .leading)
-            .background(Theme.secondaryBackground)
-            .foregroundStyle(Color.primary)
-            .clipShape(RoundedRectangle(cornerRadius: Theme.cardCorner, style: .continuous))
-        }
-        .buttonStyle(.plain)
-    }
 }
