@@ -22,4 +22,19 @@ enum APIError: Error, LocalizedError {
         case .notLoggedIn: return "ログインが必要です"
         }
     }
+
+    /// サーバが明示的に「もう認証しないでほしい」と返した終末的なエラーか。
+    /// 4xx (400/401/403) はサーバの意図的な拒否 → Keychain 消してログアウト。
+    /// 通信断や 5xx は「今回はダメだけど次回は動くかも」なので session 保持したまま
+    /// リトライさせるべき。この区別を bootstrap と APIClient の 401 分岐で共用する。
+    var isTerminalAuth: Bool {
+        switch self {
+        case .server(status: let s, _, _):
+            return (400...403).contains(s)
+        case .unauthorized:
+            return true
+        default:
+            return false
+        }
+    }
 }

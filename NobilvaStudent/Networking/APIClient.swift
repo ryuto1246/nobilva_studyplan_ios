@@ -113,8 +113,15 @@ actor APIClient {
                 do {
                     try await tokenProvider?.refreshTokens()
                 } catch {
-                    await tokenProvider?.clearForLogout()
-                    throw APIError.unauthorized
+                    // refresh が「サーバの明示的な拒否 (4xx)」で失敗した場合だけ
+                    // clearForLogout してセッション & DiskCache を破棄する。
+                    // 通信断や 5xx など一時エラーで clear すると「電波の悪い場所で 1 API
+                    // 叩いただけでキャッシュ全消し + ログイン画面」になり UX が悪い。
+                    if (error as? APIError)?.isTerminalAuth == true {
+                        await tokenProvider?.clearForLogout()
+                        throw APIError.unauthorized
+                    }
+                    throw error
                 }
                 attempt += 1
                 continue

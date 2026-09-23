@@ -42,6 +42,11 @@ final class AuthStore: ObservableObject, TokenProviding {
     // MARK: - Bootstrap
 
     /// アプリ起動時に呼ぶ。refresh_token が Keychain にあれば試す。
+    /// - 通信断・タイムアウト・5xx などの一時エラーでは Keychain を **消さない**。
+    ///   phase は .unauthenticated に落ちるが、Keychain の refresh_token は残るので
+    ///   次回起動でまた自動復帰の余地を残す。UX 上「電波悪くて開いただけでログアウト」を防ぐ。
+    /// - サーバが 4xx で明示的に拒否した場合のみ Keychain を削除して真ログアウト。
+    /// - 一次失敗時は 2 秒待って 1 度だけ retry する (deploy 切り替え中の 502 対策)。
     func bootstrap() async {
         phase = .bootstrapping
         guard Keychain.get(refreshKey) != nil else {
@@ -51,10 +56,30 @@ final class AuthStore: ObservableObject, TokenProviding {
         do {
             try await refreshTokens()
             phase = .authenticated
+            return
         } catch {
-            Log.auth.error("bootstrap refresh failed: \(String(describing: error))")
-            Keychain.delete(refreshKey)
-            _accessToken = nil
+            if (error as? APIError)?.isTerminalAuth == true {
+                Log.auth.error("bootstrap refresh rejected, clearing keychain: \(String(describing: error))")
+                Keychain.delete(refreshKey)
+                _accessToken = nil
+                phase = .unauthenticated
+                return
+            }
+            Log.auth.warning("bootstrap refresh transient, retry in 2s: \(String(describing: error))")
+        }
+        // 2 秒待って 1 度だけ retry。deploy 切り替え中の 502 や DNS 一時失敗を吸収する。
+        try? await Task.sleep(nanoseconds: 2_000_000_000)
+        do {
+            try await refreshTokens()
+            phase = .authenticated
+        } catch {
+            if (error as? APIError)?.isTerminalAuth == true {
+                Log.auth.error("bootstrap refresh retry rejected, clearing keychain: \(String(describing: error))")
+                Keychain.delete(refreshKey)
+                _accessToken = nil
+            } else {
+                Log.auth.warning("bootstrap refresh retry transient, keeping keychain: \(String(describing: error))")
+            }
             phase = .unauthenticated
         }
     }
