@@ -125,8 +125,9 @@ struct DashboardView: View {
     ///  1) 期限切れタスクがあるなら promt
     ///  2) 今日の計画が全完了なら祝辞
     ///  3) 今日の残タスクを表示
-    ///  4) 次の面談を軽く伝える
-    ///  5) 日替わりの汎用エール
+    ///  4) 日替わりの汎用エール
+    /// 面談は upcomingMeetingCard がカード UI で明示するので、ここでは
+    /// 重複して出さない。
     private func subMessage(_ s: DashboardSummary) -> String {
         let todayItems = s.today?.plan?.items ?? []
         let doneToday = todayItems.filter { $0.status == .completed }.count
@@ -141,14 +142,6 @@ struct DashboardView: View {
         if !todayItems.isEmpty {
             let remain = todayItems.count - doneToday
             return "今日の計画はあと \(remain) 件。1つずつ片付けよう。"
-        }
-        if let m = s.upcomingMeeting, !m.isPast,
-           let start = JSTDate.parseTimestamp(m.scheduledStartAt) {
-            let df = DateFormatter()
-            df.locale = Locale(identifier: "ja_JP")
-            df.dateFormat = "M/d(E) HH:mm"
-            df.timeZone = JSTDate.timeZone
-            return "次の面談: \(df.string(from: start))"
         }
         let messages = [
             "今日は何を進めよう？",
