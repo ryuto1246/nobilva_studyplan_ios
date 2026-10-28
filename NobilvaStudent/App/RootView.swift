@@ -41,7 +41,6 @@ struct RootView: View {
             }
         case .authenticated:
             MainTabView()
-                .task { await PushService.shared.requestAuthorizationAndRegister() }
         }
     }
 

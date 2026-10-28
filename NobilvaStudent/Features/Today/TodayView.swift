@@ -15,6 +15,7 @@ struct TodayView: View {
     @EnvironmentObject var router: AppRouter
     @EnvironmentObject var timer: StudyTimer
     @EnvironmentObject var toast: ToastCenter
+    @EnvironmentObject var tour: TourController
     @Environment(\.scenePhase) private var scenePhase
     @StateObject private var vm = TodayViewModel()
 
@@ -29,9 +30,13 @@ struct TodayView: View {
                 .navigationTitle("今日")
                 .toolbar {
                     ToolbarItem(placement: .topBarTrailing) {
+                        // Label だとツールバーが UIKit の部品に置き換えて描画し、ツアーが
+                        // 位置を取れないので Image + accessibilityLabel にしている。
                         Button { showAddTask = true } label: {
-                            Label("タスクを追加", systemImage: "plus")
+                            Image(systemName: "plus")
                         }
+                        .accessibilityLabel("タスクを追加")
+                        .tourTarget(.todayAddButton)
                     }
                 }
                 .refreshable { await vm.load() }
@@ -70,25 +75,44 @@ struct TodayView: View {
         case .failed:
             ScrollView { RetryStateView { await vm.load() }.padding(.top, 80) }
         case .loaded:
-            ScrollView {
-                VStack(alignment: .leading, spacing: 28) {
-                    progressHeader
-                    // 面談の当日は、やることより先に面談を見せる。
-                    if vm.upcomingMeeting?.isToday == true { meetingSection }
-                    focusSection
-                    nextUpSection
-                    if vm.upcomingMeeting?.isToday != true { meetingSection }
-                    unscheduledSection
-                    completedSection
-                    allPlansLink
+            ScrollViewReader { proxy in
+                ScrollView {
+                    VStack(alignment: .leading, spacing: 28) {
+                        progressHeader
+                        // 面談の当日は、やることより先に面談を見せる。
+                        if vm.upcomingMeeting?.isToday == true { meetingSection }
+                        focusSection
+                            .tourTarget(focusItem != nil ? .todayFocus : nil)
+                            .id(TourTarget.todayFocus)
+                        nextUpSection
+                            .tourTarget(nextUpItems.isEmpty ? nil : .todayNextUp)
+                            .id(TourTarget.todayNextUp)
+                        if vm.upcomingMeeting?.isToday != true { meetingSection }
+                        unscheduledSection
+                        completedSection
+                    }
+                    .padding(.horizontal, 16)
+                    .padding(.bottom, 24)
                 }
-                .padding(.horizontal, 16)
-                .padding(.bottom, 24)
+                // ツアーが画面外の項目を指したらそこまでスクロールする。
+                .onChange(of: tour.current?.target) { _, target in
+                    guard let target, tour.current?.tab == .today else { return }
+                    withAnimation { proxy.scrollTo(target, anchor: .center) }
+                }
             }
         }
     }
 
     // MARK: - Sections
+
+    /// 計画がまだ無い生徒のツアー中は、見本を出して場所を指せるようにする。
+    private var focusItem: StudyItem? {
+        vm.focus ?? (tour.isActive ? TourSample.focus : nil)
+    }
+
+    private var nextUpItems: [StudyItem] {
+        vm.nextUp.isEmpty && tour.isActive ? TourSample.nextUp : vm.nextUp
+    }
 
     /// 日付と「何件中何件」を 1 行で。大きな挨拶は置かず、情報だけを静かに見せる。
     private var progressHeader: some View {
@@ -118,7 +142,7 @@ struct TodayView: View {
 
     @ViewBuilder
     private var focusSection: some View {
-        if let focus = vm.focus {
+        if let focus = focusItem {
             FocusCard(
                 item: focus,
                 isTiming: timer.hasSession,
@@ -146,14 +170,16 @@ struct TodayView: View {
     @ViewBuilder
     private var allDoneSection: some View {
         VStack(alignment: .leading, spacing: 12) {
+            // 一日の区切りなので、ここだけはカードにして目立たせる。
             InlineEmptyState(
                 title: "今日の計画はすべて完了しました",
                 message: "お疲れさまでした。",
                 systemImage: "checkmark.seal.fill"
             )
+            .background(Theme.secondaryBackground, in: RoundedRectangle(cornerRadius: Theme.cardCorner, style: .continuous))
             if !vm.completedToday.isEmpty {
                 SectionHeader("今日やったこと")
-                StudyItemList(items: vm.completedToday) { item in
+                StudyItemList(items: vm.completedToday, style: .plain) { item in
                     StudyItemRow(item: item, onToggle: { toggle(item) })
                 }
             }
@@ -161,7 +187,7 @@ struct TodayView: View {
                 SectionHeader("明日の予定") {
                     if let d = vm.tomorrowDate { Text(JSTDate.monthDay(d)).foregroundStyle(.secondary) }
                 }
-                StudyItemList(items: vm.tomorrowPreview, dividerInset: 12) { item in
+                StudyItemList(items: vm.tomorrowPreview, style: .plain, dividerInset: 12) { item in
                     StudyItemRow(item: item)
                 }
             }
@@ -170,10 +196,10 @@ struct TodayView: View {
 
     @ViewBuilder
     private var nextUpSection: some View {
-        if !vm.nextUp.isEmpty {
+        if !nextUpItems.isEmpty {
             VStack(alignment: .leading, spacing: 10) {
                 SectionHeader("次にやること")
-                StudyItemList(items: vm.nextUp, style: .plain) { item in
+                StudyItemList(items: nextUpItems, style: .plain) { item in
                     StudyItemRow(
                         item: item,
                         onToggle: { toggle(item) },
@@ -196,7 +222,7 @@ struct TodayView: View {
             VStack(alignment: .leading, spacing: 8) {
                 CollapsibleHeader(title: "今日完了したもの (\(done.count)件)", isExpanded: $showCompleted)
                 if showCompleted {
-                    StudyItemList(items: done) { item in
+                    StudyItemList(items: done, style: .plain) { item in
                         StudyItemRow(item: item, onToggle: { toggle(item) })
                     }
                 }
@@ -248,6 +274,7 @@ struct TodayView: View {
     /// 押した瞬間に表示・トースト・振動を返す (通信は数秒かかることがあるため待たない)。
     /// 失敗したら表示を戻し、エラーを出す。
     private func toggle(_ item: StudyItem) {
+        guard !TourSample.isSample(item) else { return }
         // タイマーを使わずに完了するときは、かかった時間を記録するよう促す。
         if vm.shouldAskRecordTime(item) {
             router.askRecordTime(for: item) { choice in
@@ -301,7 +328,7 @@ struct TodayView: View {
         if !open.isEmpty {
             VStack(alignment: .leading, spacing: 10) {
                 SectionHeader("日付が決まっていないタスク")
-                StudyItemList(items: open) { item in
+                StudyItemList(items: open, style: .plain) { item in
                     StudyItemRow(
                         item: item,
                         onToggle: { toggle(item) },
@@ -313,20 +340,5 @@ struct TodayView: View {
                 }
             }
         }
-    }
-
-
-    private var allPlansLink: some View {
-        NavigationLink {
-            PlanListView()
-        } label: {
-            Label("これからの計画をすべて見る", systemImage: "calendar")
-                .font(.body.weight(.semibold))
-                .frame(maxWidth: .infinity, minHeight: 34)
-                .foregroundStyle(Color.primary)
-        }
-        // 画面の主操作 (取り組む・面談に参加) と色を競わないよう、灰色の控えめなボタンにする。
-        .buttonStyle(.bordered)
-        .tint(.secondary)
     }
 }

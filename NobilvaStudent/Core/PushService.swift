@@ -76,6 +76,16 @@ final class PushService: NSObject {
         }
     }
 
+    /// ログアウト (強制ログアウト・アカウント削除を含む) の後に呼ぶ。
+    /// 強制ログアウトではもう認証できずサーバの行を消せないので、端末側で APNs の
+    /// 受信を止めて、前の生徒あての通知が届かないようにする。次のログインで
+    /// registerForRemoteNotifications し直すと、サーバは device_token で行を張り替える。
+    func stopReceivingAfterSignOut() {
+        pendingTokenHex = nil
+        registeredTokenHex = nil
+        UIApplication.shared.unregisterForRemoteNotifications()
+    }
+
     private func flushPendingToken() {
         guard let hex = pendingTokenHex, let api else { return }
         let device = UIDevice.current

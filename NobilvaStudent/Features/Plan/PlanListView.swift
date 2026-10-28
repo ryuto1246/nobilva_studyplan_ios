@@ -22,7 +22,10 @@ struct PlanListView: View {
     @State private var isLoading = true
     @State private var loadFailed = false
     @State private var errorMessage: String?
-    @State private var overrides: [String: Bool] = [:]
+    /// 楽観的に切り替えた完了状態。直後の再取得ではまだ古い状態が返ることがあるので、
+    /// 切り替えから一定時間は手元の状態を優先する (今日画面と同じ)。
+    private struct Override { let done: Bool; let at: Date }
+    @State private var overrides: [String: Override] = [:]
     @State private var recordedToday: Set<String> = []
 
     private let today = JSTDate.todayString()
@@ -122,7 +125,7 @@ struct PlanListView: View {
 
     private func apply(_ day: PlanDay) -> PlanDay {
         PlanDay(date: day.date, items: day.items.map { item in
-            guard let done = overrides[item.id], done != item.isDone else { return item }
+            guard let done = overrides[item.id]?.done, done != item.isDone else { return item }
             return item.withDone(done)
         })
     }
@@ -132,7 +135,7 @@ struct PlanListView: View {
         defer { isLoading = false }
         do {
             days = PlanDay.from(try await PlanRepository(api: auth.api).fetchPeriods())
-            overrides = [:]
+            overrides = overrides.filter { Date().timeIntervalSince($0.value.at) < 30 }
             loadFailed = false
             recordedToday = (try? await SessionsRepository(api: auth.api).recordedPlanItemIdsToday()) ?? recordedToday
         } catch {
@@ -159,12 +162,18 @@ struct PlanListView: View {
 
     private func recordAndComplete(_ item: StudyItem, minutes: Int) async {
         let previous = overrides[item.id]
-        overrides[item.id] = true
+        overrides[item.id] = Override(done: true, at: Date())
         toast.show("\(formatMinutes(minutes))を記録して完了しました")
         do {
             try await TodayRepository(api: auth.api).recordAndComplete(item, minutes: minutes)
             recordedToday.insert(item.id)
             NotificationCenter.default.post(name: .studyDataDidChange, object: nil)
+        } catch is TodayRepository.RecordedButNotCompleted {
+            toast.dismiss()
+            recordedToday.insert(item.id)
+            overrides[item.id] = previous
+            NotificationCenter.default.post(name: .studyDataDidChange, object: nil)
+            errorMessage = TodayRepository.recordedButNotCompletedMessage
         } catch {
             toast.dismiss()
             overrides[item.id] = previous
@@ -175,7 +184,7 @@ struct PlanListView: View {
     private func toggle(_ item: StudyItem) async {
         let next = !item.isDone
         let previous = overrides[item.id]
-        overrides[item.id] = next
+        overrides[item.id] = Override(done: next, at: Date())
         // 押した瞬間に知らせる (通信を待たない)。
         if next {
             toast.show("「\(item.title)」を完了しました", actionTitle: "元に戻す") {
@@ -189,7 +198,7 @@ struct PlanListView: View {
             NotificationCenter.default.post(name: .studyDataDidChange, object: nil)
         } catch {
             toast.dismiss()
-            if overrides[item.id] == next { overrides[item.id] = previous }
+            if overrides[item.id]?.done == next { overrides[item.id] = previous }
             errorMessage = "更新できませんでした。通信状況を確認してください。"
         }
     }

@@ -9,6 +9,7 @@ struct MainTabView: View {
     @EnvironmentObject var router: AppRouter
     @EnvironmentObject var timer: StudyTimer
     @EnvironmentObject var toast: ToastCenter
+    @EnvironmentObject var tour: TourController
 
     enum Tab: Hashable {
         case today, chat, myPage
@@ -37,6 +38,25 @@ struct MainTabView: View {
             timer.attach(api: auth.api)
         }
         .onDisappear { chatUnread.stop() }
+        // 使い方ツアー。タブバーごと覆うので TabView の上に重ねる。
+        .overlay { TourOverlay(tour: tour) }
+        .onChange(of: tour.index) { _, _ in
+            router.selectedTab = tour.current?.tab ?? .today
+        }
+        // 通知の許可はツアーが終わってから聞く (システムのダイアログで案内を遮らない)。
+        .onChange(of: tour.isActive) { _, active in
+            if !active, auth.phase == .authenticated { Task { await PushService.shared.requestAuthorizationAndRegister() } }
+        }
+        .task {
+            tour.userId = auth.currentUser?.id
+            guard !tour.hasCompleted else {
+                await PushService.shared.requestAuthorizationAndRegister()
+                return
+            }
+            // 初回ログイン後に一度だけ自動で開始。今日画面の読み込みを少し待つ。
+            try? await Task.sleep(nanoseconds: 800_000_000)
+            if !tour.isActive { tour.start() }
+        }
         // タイマーで記録できたら、シートを閉じてトーストで知らせる (アラートで止めない)。
         .onChange(of: timer.lastRecord) { _, record in
             guard let record else { return }

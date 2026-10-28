@@ -11,6 +11,7 @@ struct NobilvaStudentApp: App {
     @StateObject private var deepLink = DeepLinkRouter()
     @StateObject private var timer = StudyTimer()
     @StateObject private var toast = ToastCenter()
+    @StateObject private var tour = TourController()
 
     var body: some Scene {
         WindowGroup {
@@ -21,6 +22,7 @@ struct NobilvaStudentApp: App {
                 .environmentObject(deepLink)
                 .environmentObject(timer)
                 .environmentObject(toast)
+                .environmentObject(tour)
                 .tint(Theme.accent)
                 .task { await auth.bootstrap() }
                 // Universal Links (招待メールの /claim/* とリカバリメールの /recover/*)
