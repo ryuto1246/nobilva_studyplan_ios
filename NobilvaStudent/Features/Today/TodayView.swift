@@ -170,11 +170,13 @@ struct TodayView: View {
     @ViewBuilder
     private var allDoneSection: some View {
         VStack(alignment: .leading, spacing: 12) {
+            // 一日の区切りなので、ここだけはカードにして目立たせる。
             InlineEmptyState(
                 title: "今日の計画はすべて完了しました",
                 message: "お疲れさまでした。",
                 systemImage: "checkmark.seal.fill"
             )
+            .background(Theme.secondaryBackground, in: RoundedRectangle(cornerRadius: Theme.cardCorner, style: .continuous))
             if !vm.completedToday.isEmpty {
                 SectionHeader("今日やったこと")
                 StudyItemList(items: vm.completedToday, style: .plain) { item in
