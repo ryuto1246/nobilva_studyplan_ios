@@ -248,6 +248,22 @@ struct TodayView: View {
     /// 押した瞬間に表示・トースト・振動を返す (通信は数秒かかることがあるため待たない)。
     /// 失敗したら表示を戻し、エラーを出す。
     private func toggle(_ item: StudyItem) {
+        // タイマーを使わずに完了するときは、かかった時間を記録するよう促す。
+        if vm.shouldAskRecordTime(item) {
+            router.askRecordTime(for: item) { choice in
+                switch choice {
+                case .skip: completeWithoutRecord(item)
+                case .record(let minutes):
+                    toast.show("\(formatMinutes(minutes))を記録して完了しました")
+                    Task { if await vm.recordAndComplete(item, minutes: minutes) == false { toast.dismiss() } }
+                }
+            }
+            return
+        }
+        completeWithoutRecord(item)
+    }
+
+    private func completeWithoutRecord(_ item: StudyItem) {
         if item.isDone {
             toast.show("未完了に戻しました", systemImage: "arrow.uturn.backward.circle.fill", tint: .secondary, feel: .neutral)
         } else {

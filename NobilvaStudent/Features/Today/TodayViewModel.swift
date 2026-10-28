@@ -13,6 +13,8 @@ final class TodayViewModel: ObservableObject {
     @Published private(set) var loadState: LoadState = .loading
     @Published private(set) var summary: DashboardSummary?
     @Published private(set) var unscheduledTasks: [StudentTask] = []
+    /// 今日すでに時間を記録した計画アイテム (完了時に記録を促さない)。
+    private(set) var recordedToday: Set<String> = []
     @Published var errorMessage: String?
     /// 表示中のデータがある状態で再取得に失敗した時刻 (View がトーストで知らせる)。
     @Published private(set) var refreshFailedAt: Date?
@@ -127,6 +129,9 @@ final class TodayViewModel: ObservableObject {
         if case .success(let tasks) = await tasksResult {
             unscheduledTasks = tasks
         }
+        if let ids = try? await SessionsRepository(api: api).recordedPlanItemIdsToday() {
+            recordedToday = ids
+        }
     }
 
     // MARK: - Mutations
@@ -145,6 +150,29 @@ final class TodayViewModel: ObservableObject {
             // 連打していても、この操作の前の状態に戻す。
             if overrides[item.id]?.done == next { overrides[item.id] = previous }
             errorMessage = "更新できませんでした。通信状況を確認してください。"
+            return false
+        }
+    }
+
+    /// 完了にする前に、かかった時間を記録するよう促すべきか。
+    func shouldAskRecordTime(_ item: StudyItem) -> Bool {
+        !item.isDone && !recordedToday.contains(item.id)
+    }
+
+    /// 時間を記録して完了。失敗したら表示を戻す。
+    @discardableResult
+    func recordAndComplete(_ item: StudyItem, minutes: Int) async -> Bool {
+        guard let api else { return false }
+        let previous = overrides[item.id]
+        overrides[item.id] = Override(done: true, at: Date())
+        do {
+            try await TodayRepository(api: api).recordAndComplete(item, minutes: minutes)
+            recordedToday.insert(item.id)
+            NotificationCenter.default.post(name: .studyDataDidChange, object: nil)
+            return true
+        } catch {
+            overrides[item.id] = previous
+            errorMessage = "記録できませんでした。通信状況を確認してください。"
             return false
         }
     }

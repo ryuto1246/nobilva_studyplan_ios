@@ -65,7 +65,7 @@ Signing & Capabilities で以下を行う (初回のみ):
 
 - **今日**: 「まずはこれ」(期限切れ → 今日の未完了の先頭) + 次にやること + 次の面談 + 日付未定タスク。行タップでタイマー、長押しで相談・編集
 - **チャット**: 先生 1 人 1 行 (スレッド未作成の先生も同じ一覧)。会話は日付区切り・お知らせ (管理者メッセージ) の区別・長押しコピー・画像の拡大
-- **マイページ**: 学習記録 / 計画一覧 / 面談 / 使えない時間 / 設定 / 使い方 / アカウント削除
+- **マイページ**: 1 週間の計画・学習記録 (数字とグラフ) / 計画一覧 / 面談 / 使えない時間 / 設定 / 使い方 / アカウント削除
 - **タイマー**: シートで開くが、状態は `StudyTimer` (アプリ全体で 1 つ・UserDefaults に永続化) が持つ。計測中はタブバー上に計測バーが出る
 
 **共通部品 (DesignSystem/)**: `StudyItemRow` (やること 1 行) / `FocusCard` / `SubjectBadge` / `MeetingSummary` / `PrimaryButton`・`SecondaryButton` / `LoadingStateView`・`RetryStateView`・`InlineEmptyState` / `SectionHeader` / `TimerAccessoryBar`。

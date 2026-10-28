@@ -39,9 +39,6 @@ struct MyPageView: View {
                     } else {
                         ProgressView().frame(maxWidth: .infinity, minHeight: 120)
                     }
-                    NavigationLink { HistoryView() } label: {
-                        LabeledRow("日ごとの記録を見る", systemImage: "list.bullet")
-                    }
                 } header: {
                     Text("学習記録")
                 }

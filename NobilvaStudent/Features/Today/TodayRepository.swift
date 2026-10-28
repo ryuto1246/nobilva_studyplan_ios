@@ -34,6 +34,14 @@ struct TodayRepository {
         }
     }
 
+    /// かかった時間を手動で記録して完了にする。計画アイテムは記録 API がそのまま完了にし、
+    /// タスクは記録 (紐付けなし) のあとに完了にする。
+    func recordAndComplete(_ item: StudyItem, minutes: Int) async throws {
+        let _: SessionCompletedResponse = try await TimerRepository(api: api)
+            .manual(planItemId: item.planItemId, durationMinutes: minutes)
+        if item.kind == .task { try await setTaskStatus(item.id, status: .completed) }
+    }
+
     /// StudentTask のステータス更新 (期限切れタスクの完了トグル用)。
     /// plan_items ではなく tasks テーブル側の status を直接更新する。
     func setTaskStatus(_ id: String, status: TaskStatus) async throws {

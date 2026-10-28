@@ -53,6 +53,9 @@ struct MainTabView: View {
                 .environmentObject(timer)
                 .environmentObject(toast)
         }
+        .sheet(item: $router.completing) { req in
+            RecordOnCompleteSheet(item: req.item, onChoose: req.onChoose)
+        }
         .sheet(item: $router.consulting) { req in
             TaskChatSheet(card: req.card, onSuccess: { toast.show("先生に相談を送りました") })
                 .environmentObject(auth)

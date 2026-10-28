@@ -23,6 +23,7 @@ struct PlanListView: View {
     @State private var loadFailed = false
     @State private var errorMessage: String?
     @State private var overrides: [String: Bool] = [:]
+    @State private var recordedToday: Set<String> = []
 
     private let today = JSTDate.todayString()
 
@@ -111,7 +112,7 @@ struct PlanListView: View {
     private func row(_ item: StudyItem, isFuture: Bool) -> some View {
         StudyItemRow(
             item: item,
-            onToggle: isFuture ? nil : { Task { await toggle(item) } },
+            onToggle: isFuture ? nil : { requestToggle(item) },
             // 先の日に「取り組む」は誤タップが痛いので出さない。
             onTap: isFuture || item.isDone ? nil : { router.startTimer(for: item, timer: timer) },
             showsStartIcon: !timer.hasSession,
@@ -133,11 +134,41 @@ struct PlanListView: View {
             days = PlanDay.from(try await PlanRepository(api: auth.api).fetchPeriods())
             overrides = [:]
             loadFailed = false
+            recordedToday = (try? await SessionsRepository(api: auth.api).recordedPlanItemIdsToday()) ?? recordedToday
         } catch {
             loadFailed = true
             if !days.isEmpty, (error as? APIError)?.isCancelled != true {
                 toast.showError("最新の計画を読み込めませんでした")
             }
+        }
+    }
+
+    /// 完了にするときは、時間を記録していなければ記録を促す。
+    private func requestToggle(_ item: StudyItem) {
+        guard !item.isDone, !recordedToday.contains(item.id) else {
+            Task { await toggle(item) }
+            return
+        }
+        router.askRecordTime(for: item) { choice in
+            switch choice {
+            case .skip: Task { await toggle(item) }
+            case .record(let minutes): Task { await recordAndComplete(item, minutes: minutes) }
+            }
+        }
+    }
+
+    private func recordAndComplete(_ item: StudyItem, minutes: Int) async {
+        let previous = overrides[item.id]
+        overrides[item.id] = true
+        toast.show("\(formatMinutes(minutes))を記録して完了しました")
+        do {
+            try await TodayRepository(api: auth.api).recordAndComplete(item, minutes: minutes)
+            recordedToday.insert(item.id)
+            NotificationCenter.default.post(name: .studyDataDidChange, object: nil)
+        } catch {
+            toast.dismiss()
+            overrides[item.id] = previous
+            errorMessage = "記録できませんでした。通信状況を確認してください。"
         }
     }
 

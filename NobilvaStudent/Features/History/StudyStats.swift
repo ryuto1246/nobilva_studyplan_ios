@@ -2,74 +2,6 @@ import SwiftUI
 import Charts
 import UIKit
 
-/// 学習記録 (マイページから push)。直近 7 日の学習時間を日ごとに見せる。
-struct HistoryView: View {
-    @EnvironmentObject var auth: AuthStore
-    @EnvironmentObject var toast: ToastCenter
-
-    @State private var stats: StudyStats?
-    @State private var isLoading = true
-
-    var body: some View {
-        Group {
-            if let stats {
-                content(stats)
-            } else if isLoading {
-                LoadingStateView()
-            } else {
-                ScrollView { RetryStateView { await load() }.padding(.top, 80) }
-            }
-        }
-        .background(Color(UIColor.systemBackground).ignoresSafeArea())
-        .navigationTitle("学習記録")
-        .navigationBarTitleDisplayMode(.inline)
-        .task { await load() }
-        .refreshable { await load() }
-    }
-
-    /// 要約 (数字) → グラフ → 日ごとの一覧。どれも枠で囲まず、白い画面に順に置く。
-    private func content(_ s: StudyStats) -> some View {
-        ScrollView {
-            VStack(alignment: .leading, spacing: 24) {
-                StudySummaryView(stats: s, chartHeight: 200)
-                if s.totalMinutes > 0 {
-                    VStack(alignment: .leading, spacing: 0) {
-                        Text("日ごと")
-                            .font(.subheadline.weight(.semibold))
-                            .foregroundStyle(.secondary)
-                            .padding(.bottom, 4)
-                        ForEach(s.days.reversed()) { d in
-                            HStack {
-                                Text(d.label)
-                                Spacer()
-                                Text(d.minutes == 0 ? "—" : formatMinutes(d.minutes))
-                                    .foregroundStyle(d.minutes == 0 ? .tertiary : .primary)
-                                    .monospacedDigit()
-                            }
-                            .font(.body)
-                            .frame(minHeight: 44)
-                            Divider()
-                        }
-                    }
-                }
-            }
-            .padding(16)
-        }
-    }
-
-    private func load() async {
-        isLoading = true
-        defer { isLoading = false }
-        do {
-            stats = try await StudyStats.load(api: auth.api)
-        } catch {
-            if stats != nil, (error as? APIError)?.isCancelled != true {
-                toast.showError("最新の記録を読み込めませんでした")
-            }
-        }
-    }
-}
-
 /// 学習時間の要約: 今日 / 直近7日 / 1日平均 の数字と、曜日ごとのグラフ。
 /// 学習記録の画面とマイページで共有する。
 struct StudySummaryView: View {
@@ -164,5 +96,18 @@ struct SessionsRepository {
     let api: APIClient
     func sessions(days: Int) async throws -> [StudySession] {
         try await api.get("/api/v1/student/sessions", query: ["days": "\(days)"])
+    }
+
+    /// 今日 (JST) すでに学習時間を記録した計画アイテムの id。
+    /// 完了時に「時間を記録しますか？」を出すかどうかの判定に使う。
+    func recordedPlanItemIdsToday() async throws -> Set<String> {
+        let today = JSTDate.todayString()
+        let list = try await sessions(days: 2)
+        return Set(list.compactMap { s -> String? in
+            guard let id = s.planItemId, s.durationSeconds > 0,
+                  let at = JSTDate.parseTimestamp(s.startedAt),
+                  JSTDate.iso.string(from: at) == today else { return nil }
+            return id
+        })
     }
 }
