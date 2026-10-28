@@ -3,9 +3,16 @@ import SwiftUI
 struct RootView: View {
     @EnvironmentObject var auth: AuthStore
     @EnvironmentObject var deepLink: DeepLinkRouter
+    @EnvironmentObject var toast: ToastCenter
+    @EnvironmentObject var timer: StudyTimer
 
     var body: some View {
         content
+            .toastHost(toast)
+            // ログイン操作が成功した瞬間だけ鳴らす (起動時の自動ログインでは鳴らさない)。
+            .onChange(of: auth.phase) { old, new in
+                if old == .unauthenticated, new == .authenticated { Haptics.success() }
+            }
             // Recovery は authenticated / unauthenticated どちらの状態でも fullScreen で被せる。
             // token 消費で phase が .authenticated に切り替わり、成功画面で dismiss → MainTabView へ。
             .fullScreenCover(isPresented: recoveryBinding) {

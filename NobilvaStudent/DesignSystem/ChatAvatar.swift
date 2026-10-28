@@ -15,7 +15,7 @@ struct ChatAvatar: View {
             .font(.system(size: size * 0.45, weight: .semibold))
             .foregroundStyle(.white)
             .frame(width: size, height: size)
-            .background(Theme.subjectColor(name))
+            .background(Theme.avatarColor(name))
             .clipShape(Circle())
     }
 }

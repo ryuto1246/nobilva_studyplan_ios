@@ -1,31 +1,31 @@
 import SwiftUI
+import UIKit
 
+/// タイマーのシート。計測状態は StudyTimer (アプリ全体で 1 つ) が持つので、
+/// シートを閉じても計測は続き、タブバー上の計測バーから戻ってこられる。
 struct TimerView: View {
     @EnvironmentObject var auth: AuthStore
-    @EnvironmentObject var router: AppRouter
+    @EnvironmentObject var timer: StudyTimer
+    @EnvironmentObject var toast: ToastCenter
     @Environment(\.dismiss) var dismiss
-    @StateObject private var engine = PomodoroEngine()
 
-    @State private var mode: PomodoroEngine.Mode = .pomodoro
-    @State private var todayItems: [PlanItem] = []
-    @State private var selectedItemId: String? = nil
-    @State private var sessionId: String? = nil
-    @State private var errorMessage: String?
+    @State private var todayItems: [StudyItem] = []
     @State private var showManualSheet = false
-    @State private var recordedFlag = false
+    @State private var showDiscardConfirm = false
 
     var body: some View {
         NavigationStack {
             ScrollView {
-                VStack(spacing: 20) {
-                    modeSelector
-                    ringSection
-                    countdownStepper
-                    itemPicker
-                    actionButtons
-                    manualEntryButton
+                VStack(spacing: 24) {
+                    targetSection
+                    if !timer.hasSession { modeSelector }
+                    ring
+                    if timer.snapshot.mode == .timer && !timer.hasSession { countdownStepper }
+                    controls
                 }
                 .padding(20)
+                .frame(maxWidth: 520)
+                .frame(maxWidth: .infinity)
             }
             .background(Theme.groupedBackground.ignoresSafeArea())
             .navigationTitle("タイマー")
@@ -34,206 +34,198 @@ struct TimerView: View {
                 ToolbarItem(placement: .topBarLeading) {
                     Button("閉じる") { dismiss() }
                 }
+                if !timer.hasSession {
+                    ToolbarItem(placement: .topBarTrailing) {
+                        Button("手動で記録") { showManualSheet = true }
+                    }
+                }
             }
-            .task { await loadPrefs(); await loadTodayItems(); adoptRouterPreselect() }
-            .onChange(of: router.timerPreselectedPlanItemId) { _, _ in adoptRouterPreselect() }
-            .alert("お疲れさま！", isPresented: $recordedFlag) {
-                Button("OK") { recordedFlag = false }
-            } message: {
-                Text("学習を記録しました。")
-            }
-            .errorAlert($errorMessage)
+            .task { await loadPrefs(); await loadTodayItems() }
+            // 計測中にこの画面を開いている間だけ、画面を自動で消さない。
+            .onAppear { UIApplication.shared.isIdleTimerDisabled = timer.isRunning }
+            .onChange(of: timer.isRunning) { _, running in UIApplication.shared.isIdleTimerDisabled = running }
+            .onDisappear { UIApplication.shared.isIdleTimerDisabled = false }
+            .errorAlert($timer.errorMessage)
+            // シートの上でもトーストが見えるように (アプリのルートの表示はシートの下に隠れる)。
+            .toastHost(toast)
             .sheet(isPresented: $showManualSheet) {
-                ManualRecordSheet(todayItems: todayItems, initialPlanItemId: selectedItemId) { minutes, planItemId in
-                    Task { await manualRecord(minutes: minutes, planItemId: planItemId) }
+                ManualRecordSheet(todayItems: todayItems, initialPlanItemId: timer.snapshot.item?.planItemId) { minutes in
+                    toast.show("\(formatMinutes(minutes))の学習を記録しました")
+                    dismiss()
                 }
                 .environmentObject(auth)
             }
         }
     }
 
-    private var modeSelector: some View {
-        Picker("モード", selection: $mode) {
-            Text("ポモドーロ").tag(PomodoroEngine.Mode.pomodoro)
-            Text("タイマー").tag(PomodoroEngine.Mode.timer)
-            Text("ストップウォッチ").tag(PomodoroEngine.Mode.stopwatch)
-        }
-        .pickerStyle(.segmented)
-        .onChange(of: mode) { _, new in engine.setMode(new) }
-    }
+    // MARK: - Sections
 
-    private var ringSection: some View {
-        TimerRing(
-            progress: engine.progress,
-            label: formatTime(engine.displaySeconds),
-            subLabel: engine.mode == .pomodoro ? "\(engine.phase.rawValue) (\(engine.pomodoroCycle) 回目)" : nil,
-            tint: engine.phase == .work ? Theme.accent : .green
-        )
-        .frame(width: 240, height: 240)
-        .padding(.top, 8)
-    }
-
+    /// 何に取り組むか。計測中は固定表示、計測前は今日の計画から選べる。
     @ViewBuilder
-    private var countdownStepper: some View {
-        if engine.mode == .timer && !engine.isRunning {
-            Stepper("カウントダウン: \(engine.countdownMinutes) 分",
-                    value: Binding(get: { engine.countdownMinutes }, set: { engine.setCountdownMinutes($0) }),
-                    in: 5...180, step: 5)
-        }
-    }
-
-    @ViewBuilder
-    private var itemPicker: some View {
-        if !todayItems.isEmpty {
-            VStack(alignment: .leading, spacing: 6) {
-                Text("今日の計画から選択").font(.caption).foregroundStyle(.secondary)
-                Picker("計画アイテム", selection: $selectedItemId) {
-                    Text("(なし)").tag(String?.none)
-                    ForEach(todayItems.sorted { $0.sortOrder < $1.sortOrder }) { item in
-                        Text(item.title).tag(String?.some(item.id))
+    private var targetSection: some View {
+        if timer.hasSession {
+            VStack(spacing: 4) {
+                Text(timer.snapshot.item?.title ?? "自由学習")
+                    .font(.title3.bold())
+                    .multilineTextAlignment(.center)
+                if let subject = timer.snapshot.item?.subject, !subject.isEmpty {
+                    SubjectBadge(subject: subject)
+                }
+            }
+        } else {
+            Menu {
+                Button("自由学習 (選ばない)") { timer.select(nil) }
+                if !todayItems.isEmpty {
+                    Section("今日の計画") {
+                        ForEach(todayItems) { item in
+                            Button(item.title) { timer.select(item) }
+                        }
                     }
                 }
-                .pickerStyle(.menu)
-                .padding(.horizontal, 12).padding(.vertical, 6)
-                .background(Theme.secondaryBackground)
-                .clipShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
+            } label: {
+                HStack(spacing: 8) {
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text("取り組むこと").font(.caption).foregroundStyle(.secondary)
+                        Text(timer.snapshot.item?.title ?? "自由学習 (選ばない)")
+                            .font(.body.weight(.semibold))
+                            .foregroundStyle(.primary)
+                            .multilineTextAlignment(.leading)
+                    }
+                    Spacer(minLength: 8)
+                    Image(systemName: "chevron.up.chevron.down")
+                        .font(.footnote)
+                        .foregroundStyle(.secondary)
+                }
+                .padding(.horizontal, 16)
+                .padding(.vertical, 12)
+                .frame(minHeight: 44)
+                .background(Theme.secondaryBackground, in: RoundedRectangle(cornerRadius: Theme.cardCorner, style: .continuous))
+                .contentShape(Rectangle())
             }
+            // Menu のラベルはアクセント色に塗られるので、通常の文字色に戻す。
+            .tint(.primary)
+            .accessibilityLabel("取り組むこと: \(timer.snapshot.item?.title ?? "自由学習")")
         }
     }
 
-    private var actionButtons: some View {
-        HStack(spacing: 12) {
-            if !engine.isRunning {
-                Button {
-                    Task { await startPressed() }
-                } label: {
-                    Label("開始", systemImage: "play.fill").frame(maxWidth: .infinity).padding(.vertical, 8)
-                }
-                .buttonStyle(.borderedProminent)
-            } else {
-                Button {
-                    engine.pause()
-                } label: {
-                    Label("一時停止", systemImage: "pause.fill").frame(maxWidth: .infinity).padding(.vertical, 8)
-                }
-                .buttonStyle(.bordered)
-                Button {
-                    Task { await stopAndRecord() }
-                } label: {
-                    Label("完了", systemImage: "checkmark").frame(maxWidth: .infinity).padding(.vertical, 8)
-                }
-                .buttonStyle(.borderedProminent)
-                .tint(.green)
-            }
+    private var modeSelector: some View {
+        Picker("モード", selection: Binding(
+            get: { timer.snapshot.mode },
+            set: { timer.configure(mode: $0) }
+        )) {
+            ForEach(StudyTimer.Mode.allCases) { m in Text(m.label).tag(m) }
+        }
+        .pickerStyle(.segmented)
+    }
+
+    private var ring: some View {
+        let r = timer.reading
+        return TimerRing(
+            progress: timer.progress,
+            label: Self.clock(timer.displaySeconds),
+            subLabel: ringCaption(r),
+            tint: r.phase == .work || timer.snapshot.mode != .pomodoro ? Theme.accent : .green
+        )
+        .frame(width: 260, height: 260)
+    }
+
+    private func ringCaption(_ r: StudyTimer.Reading) -> String? {
+        if r.finished { return "時間になりました" }
+        switch timer.snapshot.mode {
+        case .pomodoro:
+            return r.phase == .work ? "作業 \(r.completedWorkPhases + 1)回目" : r.phase.label
+        case .timer, .stopwatch:
+            return timer.isPaused ? "一時停止中" : nil
         }
     }
 
-    private var manualEntryButton: some View {
-        Button {
-            showManualSheet = true
-        } label: {
-            Label("手動で記録", systemImage: "square.and.pencil")
-                .font(.subheadline)
+    private var countdownStepper: some View {
+        Stepper(value: Binding(
+            get: { timer.snapshot.countdownMinutes },
+            set: { timer.configure(countdownMinutes: $0) }
+        ), in: 5...180, step: 5) {
+            Text("時間: \(timer.snapshot.countdownMinutes)分")
         }
-        .buttonStyle(.plain)
-        .foregroundStyle(Theme.accent)
+        .padding(.horizontal, 16)
+        .padding(.vertical, 8)
+        .background(Theme.secondaryBackground, in: RoundedRectangle(cornerRadius: Theme.cardCorner, style: .continuous))
+    }
+
+    /// 計測前: 開始 / 計測中: 一時停止・記録 / 一時停止中: 再開・記録。
+    @ViewBuilder
+    private var controls: some View {
+        if !timer.hasSession {
+            PrimaryButton("開始", systemImage: "play.fill", isLoading: timer.isStarting) {
+                Task { await timer.start() }
+            }
+        } else {
+            VStack(spacing: 12) {
+                HStack(spacing: 12) {
+                    if timer.isRunning {
+                        SecondaryButton("一時停止", systemImage: "pause.fill") { timer.pause() }
+                            .disabled(timer.isCompleting)
+                    } else if !timer.reading.finished {
+                        SecondaryButton("再開", systemImage: "play.fill") { timer.resume() }
+                            .disabled(timer.isCompleting)
+                    }
+                    PrimaryButton("記録する", systemImage: "checkmark", isLoading: timer.isCompleting) {
+                        Task { await timer.complete() }
+                    }
+                }
+                Button("記録せずに終了", role: .destructive) { showDiscardConfirm = true }
+                    .font(.subheadline)
+                    .frame(minHeight: 44)
+                    .disabled(timer.isCompleting)
+                    .confirmationDialog("記録せずに終了しますか？", isPresented: $showDiscardConfirm, titleVisibility: .visible) {
+                        Button("記録せずに終了", role: .destructive) {
+                            timer.discard()
+                            toast.show("計測を終了しました", systemImage: "stop.circle.fill", tint: .secondary, feel: .warning)
+                        }
+                    } message: {
+                        Text("ここまでの\(StudyTimer.RecordEvent(seconds: Int(timer.reading.studySeconds)).label)は記録されません。")
+                    }
+
+            }
+        }
     }
 
     // MARK: - Helpers
 
-    private func formatTime(_ seconds: Int) -> String {
-        let m = seconds / 60
-        let s = seconds % 60
-        return String(format: "%02d:%02d", m, s)
+    static func clock(_ seconds: Int) -> String {
+        let h = seconds / 3600, m = (seconds % 3600) / 60, s = seconds % 60
+        return h > 0 ? String(format: "%d:%02d:%02d", h, m, s) : String(format: "%02d:%02d", m, s)
     }
 
-    // MARK: - Actions
-
     private func loadPrefs() async {
-        do {
-            let p = try await TimerRepository(api: auth.api).pomodoroPrefs()
-            engine.workMinutes = p.pomodoroWorkMinutes
-            engine.breakMinutes = p.pomodoroBreakMinutes
-            engine.longBreakMinutes = p.pomodoroLongBreakMinutes
-        } catch {
-            // best-effort
-        }
+        guard let p = try? await TimerRepository(api: auth.api).pomodoroPrefs() else { return }
+        timer.applyPomodoroPrefs(work: p.pomodoroWorkMinutes, shortBreak: p.pomodoroBreakMinutes,
+                                 longBreak: p.pomodoroLongBreakMinutes)
     }
 
     private func loadTodayItems() async {
-        do {
-            let today = try await TimerRepository(api: auth.api).todayPlan()
-            todayItems = today.items
-        } catch { /* silent */ }
-    }
-
-    private func startPressed() async {
-        errorMessage = nil
-        let sessionMode: SessionMode = {
-            switch engine.mode {
-            case .pomodoro: return .pomodoro
-            case .timer: return .timer
-            case .stopwatch: return .stopwatch
-            }
-        }()
-        do {
-            let resp = try await TimerRepository(api: auth.api).start(mode: sessionMode, planItemId: selectedItemId)
-            sessionId = resp.sessionId
-            engine.start()
-        } catch let e as APIError {
-            errorMessage = e.errorDescription
-        } catch {
-            errorMessage = "セッションの開始に失敗しました"
-        }
-    }
-
-    private func stopAndRecord() async {
-        guard let sessionId else { engine.stop(); return }
-        let elapsed = engine.currentElapsed
-        engine.pause()
-        do {
-            _ = try await TimerRepository(api: auth.api).complete(sessionId: sessionId, durationSeconds: elapsed)
-            recordedFlag = true
-            self.sessionId = nil
-            engine.stop()
-        } catch let e as APIError {
-            errorMessage = e.errorDescription
-        } catch {
-            errorMessage = "記録に失敗しました"
-        }
-    }
-
-    private func adoptRouterPreselect() {
-        guard let id = router.timerPreselectedPlanItemId else { return }
-        selectedItemId = id
-        // 消化したので nil に戻す (次回 Timer タブに来た時に再適用されないように)
-        router.timerPreselectedPlanItemId = nil
-    }
-
-    private func manualRecord(minutes: Int, planItemId: String?) async {
-        do {
-            _ = try await TimerRepository(api: auth.api).manual(planItemId: planItemId, durationMinutes: minutes)
-            recordedFlag = true
-        } catch let e as APIError {
-            errorMessage = e.errorDescription
-        } catch {
-            errorMessage = "記録に失敗しました"
-        }
+        guard let today = try? await TimerRepository(api: auth.api).todayPlan() else { return }
+        todayItems = today.items
+            .map { StudyItem(planItem: $0, date: JSTDate.todayString()) }
+            .filter { !$0.isDone }
+            .sorted(by: StudyItem.byTimeOfDay)
     }
 }
 
-/// 手動記録シート。
+/// 手動記録シート。送信が成功してから閉じる。
 private struct ManualRecordSheet: View {
+    @EnvironmentObject var auth: AuthStore
     @Environment(\.dismiss) var dismiss
-    let todayItems: [PlanItem]
-    let onSubmit: (Int, String?) -> Void
+    let todayItems: [StudyItem]
+    let onRecorded: (Int) -> Void
 
     @State private var minutes: Int = 30
     @State private var planItemId: String?
+    @State private var isSaving = false
+    @State private var errorMessage: String?
 
-    init(todayItems: [PlanItem], initialPlanItemId: String?, onSubmit: @escaping (Int, String?) -> Void) {
+    init(todayItems: [StudyItem], initialPlanItemId: String?, onRecorded: @escaping (Int) -> Void) {
         self.todayItems = todayItems
-        self.onSubmit = onSubmit
+        self.onRecorded = onRecorded
         _planItemId = State(initialValue: initialPlanItemId)
     }
 
@@ -241,33 +233,44 @@ private struct ManualRecordSheet: View {
         NavigationStack {
             Form {
                 Section {
-                    Stepper("時間: \(minutes) 分", value: $minutes, in: 5...600, step: 5)
+                    Stepper("\(formatMinutes(minutes))", value: $minutes, in: 5...600, step: 5)
+                } header: {
+                    Text("学習した時間")
                 }
                 if !todayItems.isEmpty {
-                    Section("計画アイテムに紐付け (任意)") {
-                        Picker("アイテム", selection: $planItemId) {
-                            Text("(なし)").tag(String?.none)
-                            ForEach(todayItems.sorted { $0.sortOrder < $1.sortOrder }) { item in
+                    Section("取り組んだこと (任意)") {
+                        Picker("計画", selection: $planItemId) {
+                            Text("選ばない").tag(String?.none)
+                            ForEach(todayItems) { item in
                                 Text(item.title).tag(String?.some(item.id))
                             }
                         }
                     }
                 }
-                Section {
-                    Button {
-                        onSubmit(minutes, planItemId)
-                        dismiss()
-                    } label: {
-                        Text("記録する").bold().frame(maxWidth: .infinity)
-                    }
-                    .buttonStyle(.borderedProminent)
-                }
             }
             .navigationTitle("手動で記録")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
-                ToolbarItem(placement: .topBarLeading) { Button("キャンセル") { dismiss() } }
+                ToolbarItem(placement: .cancellationAction) { Button("キャンセル") { dismiss() } }
+                ToolbarItem(placement: .confirmationAction) {
+                    if isSaving { ProgressView() } else { Button("記録") { Task { await save() } } }
+                }
             }
+            .interactiveDismissDisabled(isSaving)
+            .errorAlert($errorMessage)
+        }
+    }
+
+    private func save() async {
+        isSaving = true
+        defer { isSaving = false }
+        do {
+            _ = try await TimerRepository(api: auth.api).manual(planItemId: planItemId, durationMinutes: minutes)
+            NotificationCenter.default.post(name: .studyDataDidChange, object: nil)
+            dismiss()
+            onRecorded(minutes)
+        } catch {
+            errorMessage = (error as? APIError)?.errorDescription ?? "記録できませんでした"
         }
     }
 }

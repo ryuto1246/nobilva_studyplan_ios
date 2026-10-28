@@ -1,0 +1,113 @@
+import SwiftUI
+import Charts
+import UIKit
+
+/// 学習時間の要約: 今日 / 直近7日 / 1日平均 の数字と、曜日ごとのグラフ。
+/// 学習記録の画面とマイページで共有する。
+struct StudySummaryView: View {
+    let stats: StudyStats
+    var chartHeight: CGFloat = 140
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 16) {
+            HStack(alignment: .top, spacing: 0) {
+                stat("今日", formatMinutes(stats.todayMinutes))
+                Divider().frame(height: 44)
+                stat("直近7日", formatMinutes(stats.totalMinutes))
+                Divider().frame(height: 44)
+                stat("1日平均", formatMinutes(stats.totalMinutes / 7))
+            }
+            if stats.totalMinutes == 0 {
+                InlineEmptyState(
+                    title: "まだ記録がありません",
+                    message: "今日画面の「取り組む」からタイマーを使うと、ここに記録されます。",
+                    systemImage: "chart.bar"
+                )
+            } else {
+                Chart(stats.days) { d in
+                    BarMark(x: .value("日付", d.weekday), y: .value("分", d.minutes))
+                        .foregroundStyle(Theme.accent)
+                        .cornerRadius(4)
+                        .accessibilityLabel(d.label)
+                        .accessibilityValue(formatMinutes(d.minutes))
+                }
+                .chartYAxis { AxisMarks(position: .leading) }
+                .frame(height: chartHeight)
+            }
+        }
+    }
+
+    private func stat(_ label: String, _ value: String) -> some View {
+        VStack(spacing: 4) {
+            Text(label).font(.caption).foregroundStyle(.secondary)
+            Text(value).font(.title3.bold().monospacedDigit()).foregroundStyle(Theme.accent)
+        }
+        .frame(maxWidth: .infinity)
+        .accessibilityElement(children: .combine)
+    }
+}
+
+/// 直近 7 日の学習時間集計。日付の区切りは JST。
+struct StudyStats {
+    struct Day: Identifiable {
+        let id: String
+        let label: String
+        /// グラフの横軸用 ("水")。7 本並べても詰まらないよう曜日だけにする。
+        let weekday: String
+        let minutes: Int
+    }
+
+    let days: [Day]
+    var totalMinutes: Int { days.reduce(0) { $0 + $1.minutes } }
+    var todayMinutes: Int { days.last?.minutes ?? 0 }
+
+    static func load(api: APIClient) async throws -> StudyStats {
+        // サーバは「今から N×24 時間」で区切るため、最も古い日が欠けないよう 1 日多く取る。
+        let sessions = try await SessionsRepository(api: api).sessions(days: 8)
+        return StudyStats(sessions: sessions)
+    }
+
+    init(sessions: [StudySession]) {
+        var byDay: [String: Int] = [:]
+        for s in sessions {
+            guard let startedAt = JSTDate.parseTimestamp(s.startedAt) else { continue }
+            byDay[JSTDate.iso.string(from: startedAt), default: 0] += s.durationSeconds / 60
+        }
+        days = (0..<7).reversed().map { offset in
+            let ymd = JSTDate.todayString(offsetDays: -offset)
+            let date = JSTDate.date(from: ymd)
+            let label = date.map { JSTDate.displayShort.string(from: $0) } ?? ymd
+            let weekday = offset == 0 ? "今日" : (date.map { JSTDate.calendar.weekdaySymbols.isEmpty ? "" : Self.weekdayFormatter.string(from: $0) } ?? "")
+            return Day(id: ymd, label: label, weekday: weekday, minutes: byDay[ymd] ?? 0)
+        }
+    }
+}
+
+extension StudyStats {
+    fileprivate static let weekdayFormatter: DateFormatter = {
+        let f = DateFormatter()
+        f.calendar = JSTDate.calendar; f.timeZone = JSTDate.timeZone
+        f.locale = Locale(identifier: "ja_JP"); f.dateFormat = "E"
+        return f
+    }()
+}
+
+struct SessionsRepository {
+    let api: APIClient
+    func sessions(days: Int) async throws -> [StudySession] {
+        try await api.get("/api/v1/student/sessions", query: ["days": "\(days)"])
+    }
+
+    /// 今日 (JST) すでに学習時間を記録した計画アイテムの id。
+    /// 完了時に「時間を記録しますか？」を出すかどうかの判定に使う。
+    func recordedPlanItemIdsToday() async throws -> Set<String> {
+        let today = JSTDate.todayString()
+        let list = try await sessions(days: 2)
+        return Set(list.compactMap { s -> String? in
+            guard let id = s.planItemId, s.durationSeconds > 0,
+                  let at = JSTDate.parseTimestamp(s.startedAt),
+                  JSTDate.iso.string(from: at) == today else { return nil }
+            return id
+        })
+    }
+}

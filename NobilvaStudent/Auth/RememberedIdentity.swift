@@ -30,6 +30,10 @@ enum RememberedIdentity {
 
     static func save(identifier: String, displayName: String? = nil) {
         let defaults = UserDefaults.standard
+        // 別のアカウントに切り替わったら、前の人の表示名を残さない。
+        if defaults.string(forKey: identifierKey) != identifier {
+            defaults.removeObject(forKey: displayNameKey)
+        }
         defaults.set(identifier, forKey: identifierKey)
         if let displayName, !displayName.isEmpty {
             defaults.set(displayName, forKey: displayNameKey)

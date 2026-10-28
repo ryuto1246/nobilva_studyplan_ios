@@ -1,7 +1,7 @@
 import Foundation
 
-/// Dashboard 集約 API と個別リフレッシュを担うリポジトリ。
-struct DashboardRepository {
+/// 今日画面 (dashboard/summary) の取得とステータス更新を担うリポジトリ。
+struct TodayRepository {
     let api: APIClient
 
     /// ホーム画面の 7 種類のデータを 1 リクエストで取得。成功時にディスクキャッシュ更新。
@@ -24,6 +24,22 @@ struct DashboardRepository {
             "/api/v1/student/plan/items/\(id)/status",
             body: StatusBody(status: status.rawValue)
         )
+    }
+
+    /// 計画アイテム / タスクどちらでも、完了 ⇄ 未完了を切り替える。
+    func setDone(_ item: StudyItem, done: Bool) async throws {
+        switch item.kind {
+        case .planItem: try await setPlanItemStatus(item.id, status: done ? .completed : .pending)
+        case .task: try await setTaskStatus(item.id, status: done ? .completed : .pending)
+        }
+    }
+
+    /// かかった時間を手動で記録して完了にする。計画アイテムは記録 API がそのまま完了にし、
+    /// タスクは記録 (紐付けなし) のあとに完了にする。
+    func recordAndComplete(_ item: StudyItem, minutes: Int) async throws {
+        let _: SessionCompletedResponse = try await TimerRepository(api: api)
+            .manual(planItemId: item.planItemId, durationMinutes: minutes)
+        if item.kind == .task { try await setTaskStatus(item.id, status: .completed) }
     }
 
     /// StudentTask のステータス更新 (期限切れタスクの完了トグル用)。

@@ -15,7 +15,8 @@ enum SessionMode: String, Codable, CaseIterable, Identifiable {
 
 struct StudySession: Codable, Identifiable, Hashable {
     let id: String
-    let studentId: String
+    /// sessions 一覧 API は student_id を select していないので optional。
+    let studentId: String?
     let planItemId: String?
     let startedAt: String
     let endedAt: String?

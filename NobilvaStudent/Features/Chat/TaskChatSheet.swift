@@ -2,7 +2,7 @@ import SwiftUI
 
 /// タスク行の「相談する」ボタンから開くシート。
 /// Web `TaskChatButton` と同じく 2 段構成:
-///  1. 講師を選ぶ (単独講師でもタップして進む)
+///  1. 先生を選ぶ (先生が 1 人だけなら省略)
 ///  2. 相談内容を入力して送信
 ///
 /// 送信は `ChatRepository.sendTaskConsultation` に委ね、成功時は onSuccess を呼び出す。
@@ -19,6 +19,7 @@ struct TaskChatSheet: View {
     @State private var message: String = ""
     @State private var isSending = false
     @State private var errorMessage: String?
+    @FocusState private var isMessageFocused: Bool
 
     var body: some View {
         NavigationStack {
@@ -32,11 +33,17 @@ struct TaskChatSheet: View {
             .background(Theme.groupedBackground.ignoresSafeArea())
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
-                ToolbarItem(placement: .topBarLeading) {
-                    Button("キャンセル") { dismiss() }
-                        .disabled(isSending)
+                ToolbarItem(placement: .cancellationAction) {
+                    // 先生を選び直せるときは「戻る」、それ以外は「キャンセル」。
+                    if selectedTeacher != nil, (partners?.count ?? 0) > 1 {
+                        Button { selectedTeacher = nil } label: { Label("戻る", systemImage: "chevron.backward") }
+                            .disabled(isSending)
+                    } else {
+                        Button("キャンセル") { dismiss() }.disabled(isSending)
+                    }
                 }
             }
+            .interactiveDismissDisabled(isSending || !message.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
             .task { await loadPartnersIfNeeded() }
             .errorAlert($errorMessage)
         }
@@ -57,7 +64,7 @@ struct TaskChatSheet: View {
             if let partners {
                 if partners.isEmpty {
                     Section {
-                        Text("相談できる講師がまだ登録されていません。")
+                        Text("相談できる先生がまだいません。")
                             .font(.subheadline)
                             .foregroundStyle(.secondary)
                     }
@@ -73,9 +80,7 @@ struct TaskChatSheet: View {
                                         Text(p.displayName)
                                             .font(.body)
                                             .foregroundStyle(Color.primary)
-                                        Text("タップして相談を開始")
-                                            .font(.caption)
-                                            .foregroundStyle(.secondary)
+
                                     }
                                     Spacer()
                                     Image(systemName: "chevron.right")
@@ -108,41 +113,28 @@ struct TaskChatSheet: View {
                     .listRowInsets(EdgeInsets(top: 8, leading: 16, bottom: 8, trailing: 16))
                     .listRowBackground(Color.clear)
             } header: {
-                Text("\(teacher.displayName) 先生に送信します").textCase(nil)
+                Text("相談する内容").textCase(nil)
             }
 
             Section("相談内容") {
-                TextField("多すぎて終わらなさそうです", text: $message, axis: .vertical)
+                TextField("例: 量が多くて終わらなさそうです", text: $message, axis: .vertical)
                     .lineLimit(4...10)
+                    .focused($isMessageFocused)
                     .disabled(isSending)
             }
-
-            Section {
-                Button {
-                    Task { await submit(teacher: teacher) }
-                } label: {
-                    HStack {
-                        Spacer()
-                        if isSending {
-                            ProgressView().padding(.trailing, 6)
-                        }
-                        Text(isSending ? "送信中…" : "送信する").bold()
-                        Spacer()
-                    }
-                }
-                .buttonStyle(.borderedProminent)
-                .disabled(isSending || message.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
-            }
         }
-        .navigationTitle("相談内容を入力")
+        .navigationTitle("\(teacher.displayName.hasSuffix("先生") ? teacher.displayName : teacher.displayName + " 先生")に相談")
         .toolbar {
-            ToolbarItem(placement: .topBarTrailing) {
-                Button("戻る") {
-                    selectedTeacher = nil
+            ToolbarItem(placement: .confirmationAction) {
+                if isSending {
+                    ProgressView()
+                } else {
+                    Button("送信") { Task { await submit(teacher: teacher) } }
+                        .disabled(message.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
                 }
-                .disabled(isSending)
             }
         }
+        .onAppear { isMessageFocused = true }
     }
 
     // MARK: - Shared
@@ -153,11 +145,9 @@ struct TaskChatSheet: View {
                 .font(.subheadline.weight(.semibold))
                 .foregroundStyle(Color.primary)
             HStack(spacing: 6) {
-                Circle().fill(Theme.subjectColor(card.subject)).frame(width: 8, height: 8)
-                Text(card.subject).font(.caption).foregroundStyle(.secondary)
+                if !card.subject.isEmpty { SubjectBadge(subject: card.subject) }
                 if !card.amount.isEmpty {
-                    Text("·").font(.caption).foregroundStyle(.secondary)
-                    Text(card.amount).font(.caption).foregroundStyle(.secondary)
+                    Text(card.amount).font(.subheadline).foregroundStyle(.secondary)
                 }
             }
         }
@@ -178,10 +168,12 @@ struct TaskChatSheet: View {
         do {
             let fresh = try await ChatRepository(api: auth.api).partners()
             partners = fresh
+            // 先生が 1 人だけなら選ぶ手順を省く。
+            if fresh.count == 1, selectedTeacher == nil { selectedTeacher = fresh[0] }
         } catch let e as APIError {
             if partners == nil { errorMessage = e.errorDescription }
         } catch {
-            if partners == nil { errorMessage = "講師一覧の取得に失敗しました" }
+            if partners == nil { errorMessage = "先生の一覧を読み込めませんでした" }
         }
     }
 

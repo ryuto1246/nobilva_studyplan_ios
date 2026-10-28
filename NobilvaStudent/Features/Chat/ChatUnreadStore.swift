@@ -24,6 +24,7 @@ final class ChatUnreadStore: ObservableObject {
     func stop() {
         pollTask?.cancel()
         pollTask = nil
+        totalUnread = 0
     }
 
     /// 手動リフレッシュ (チャットルームを閉じた直後などに呼ぶ)。

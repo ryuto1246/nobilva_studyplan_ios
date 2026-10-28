@@ -39,12 +39,47 @@ struct Meeting: Codable, Identifiable, Hashable {
         return end < Date()
     }
 
+    /// 完了済みも「終わったもの」として扱う (終了時刻が未来でも)。
+    var isFinished: Bool { status == .completed || isPast }
+    var isUpcoming: Bool { status == .scheduled && !isFinished }
+
     var displayStatus: (label: String, tint: String) {
         if status == .cancelled { return ("キャンセル", "gray") }
-        if isPast { return ("終了", "gray") }
-        if rescheduleState == .proposed { return ("リスケ提案中", "orange") }
-        if rescheduleState == .requested { return ("リスケ希望", "orange") }
+        if isFinished { return ("終了", "gray") }
+        if rescheduleState == .proposed { return ("日程の提案あり", "orange") }
+        if rescheduleState == .requested { return ("日程変更の希望あり", "orange") }
         return ("予定", "blue")
+    }
+
+    var startDate: Date? { JSTDate.parseTimestamp(scheduledStartAt) }
+
+    /// 開始日が今日 (JST) か。
+    var isToday: Bool {
+        guard let start = startDate else { return false }
+        return JSTDate.calendar.isDate(start, inSameDayAs: Date())
+    }
+
+    /// "10月31日(土) 19:00"
+    var scheduleLabel: String {
+        guard let start = startDate else { return "" }
+        return JSTDate.displayMonthDay.string(from: start) + " " + JSTDate.time.string(from: start)
+    }
+
+    /// Web `lib/meetings/format.ts` 相当の「あと N 日 / 時間 / 分」。
+    var countdownLabel: String? {
+        guard isUpcoming, let start = startDate else { return nil }
+        let seconds = start.timeIntervalSinceNow
+        if seconds <= 0 { return "開始時刻です" }
+        let minutes = Int(seconds / 60)
+        if minutes < 60 { return "あと\(max(1, minutes))分" }
+        let hours = minutes / 60
+        if hours < 24 { return "あと\(hours)時間" }
+        return "あと\(hours / 24)日"
+    }
+
+    var joinURL: URL? {
+        guard isUpcoming, let s = meetingUrl, !s.isEmpty else { return nil }
+        return URL(string: s)
     }
 
     enum CodingKeys: String, CodingKey {

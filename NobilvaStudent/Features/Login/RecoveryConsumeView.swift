@@ -44,7 +44,7 @@ struct RecoveryConsumeView: View {
             Image(systemName: "checkmark.circle.fill")
                 .font(.system(size: 64)).foregroundStyle(.green)
             Text("ログインしました").font(.title2.bold())
-            Text("この端末にパスキーを登録すると、次回から Face ID ですぐに入れます。")
+            Text("この端末にパスキーを登録すると、次回から Face ID や Touch ID ですぐにログインできます。")
                 .multilineTextAlignment(.center)
                 .foregroundStyle(.secondary)
                 .padding(.horizontal, 32)

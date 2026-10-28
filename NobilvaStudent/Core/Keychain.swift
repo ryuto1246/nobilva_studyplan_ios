@@ -16,7 +16,7 @@ enum Keychain {
         SecItemDelete(query as CFDictionary)
         var newItem = query
         newItem[kSecValueData as String] = data
-        newItem[kSecAttrAccessible as String] = kSecAttrAccessibleAfterFirstUnlock
+        newItem[kSecAttrAccessible as String] = kSecAttrAccessibleAfterFirstUnlockThisDeviceOnly
         SecItemAdd(newItem as CFDictionary, nil)
     }
 

@@ -9,6 +9,8 @@ struct NobilvaStudentApp: App {
     @StateObject private var chatUnread = ChatUnreadStore()
     @StateObject private var router = AppRouter()
     @StateObject private var deepLink = DeepLinkRouter()
+    @StateObject private var timer = StudyTimer()
+    @StateObject private var toast = ToastCenter()
     @StateObject private var tour = TourController()
 
     var body: some Scene {
@@ -18,6 +20,8 @@ struct NobilvaStudentApp: App {
                 .environmentObject(chatUnread)
                 .environmentObject(router)
                 .environmentObject(deepLink)
+                .environmentObject(timer)
+                .environmentObject(toast)
                 .environmentObject(tour)
                 .tint(Theme.accent)
                 .task { await auth.bootstrap() }

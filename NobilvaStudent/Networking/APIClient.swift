@@ -56,8 +56,13 @@ actor APIClient {
     }
 
     /// DELETE → T
-    func delete<T: Decodable>(_ path: String, authorized: Bool = true) async throws -> T {
-        try await request(path: path, method: "DELETE", query: [:], body: Optional<EmptyEncodable>.none, authorized: authorized)
+    func delete<T: Decodable>(_ path: String, query: [String: String] = [:], authorized: Bool = true) async throws -> T {
+        try await request(path: path, method: "DELETE", query: query, body: Optional<EmptyEncodable>.none, authorized: authorized)
+    }
+
+    /// DELETE body → T (確認文字列が要るアカウント削除など)
+    func delete<Body: Encodable, T: Decodable>(_ path: String, body: Body, authorized: Bool = true) async throws -> T {
+        try await request(path: path, method: "DELETE", query: [:], body: body, authorized: authorized)
     }
 
     /// bodyless POST

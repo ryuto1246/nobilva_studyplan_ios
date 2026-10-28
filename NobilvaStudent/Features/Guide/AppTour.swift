@@ -2,7 +2,7 @@ import SwiftUI
 
 /// 「使い方」ツアー。実際のタブ画面を切り替えながら、対象部分だけを
 /// くり抜いて吹き出しで説明する。初回ログイン時に自動で始まり、
-/// 設定 > 使い方 からいつでも再表示できる。
+/// マイページ > 使い方 からいつでも再表示できる。
 ///
 /// 仕組み:
 ///  - 各画面は `.tourTarget(_:)` で「ここを指せる」という目印を付け、
@@ -14,13 +14,14 @@ import SwiftUI
 
 /// ツアーで指し示す場所。`.id()` にも使うので Hashable。
 enum TourTarget: String, Hashable {
-    case homeToday
-    case homeTodoRow
-    case homeBusySlots
-    case planAddButton
-    case planToday
-    case historySummary
-    case settingsGuide
+    case todayFocus
+    case todayNextUp
+    case todayAddButton
+    case chatFirstContact
+    case myPageWeek
+    case myPageStats
+    case myPageBusySlots
+    case myPageGuide
 }
 
 struct TourStep {
@@ -31,33 +32,33 @@ struct TourStep {
     let message: String
 
     static let all: [TourStep] = [
-        TourStep(tab: .home, target: nil,
+        TourStep(tab: .today, target: nil,
                  title: "Nobilva へようこそ",
                  message: "よく使う画面と操作を順番に紹介します。「次へ」で進めてください。"),
-        TourStep(tab: .home, target: .homeToday,
-                 title: "今日の計画",
-                 message: "ホームには、担当講師と決めた今日の計画が表示されます。計画がない日は明日の分が表示されます。"),
-        TourStep(tab: .home, target: .homeTodoRow,
-                 title: "計画の進め方",
-                 message: "左の丸をタップすると完了になります。▶ で学習タイマーを開始し、吹き出しのボタンからはその内容について講師に相談できます。"),
-        TourStep(tab: .home, target: .homeBusySlots,
-                 title: "使えない時間",
-                 message: "部活や塾など、勉強に使えない時間を登録しておくと、計画を立てるときに考慮されます。"),
-        TourStep(tab: .plan, target: .planAddButton,
+        TourStep(tab: .today, target: .todayFocus,
+                 title: "まずはこれ",
+                 message: "いちばん先に取り組むことが大きく表示されます。「取り組む」でタイマーを開始し、終わったら「完了」を押します。右端のボタンからは、その内容について先生に相談できます。"),
+        TourStep(tab: .today, target: .todayNextUp,
+                 title: "次にやること",
+                 message: "残りのやることが並びます。左の丸で完了、行をタップするとタイマーが開きます。長押しすると、先生への相談や編集ができます。"),
+        TourStep(tab: .today, target: .todayAddButton,
                  title: "タスクを追加",
                  message: "宿題や自分で進めたいことは、ここからタスクとして登録できます。"),
-        TourStep(tab: .plan, target: .planToday,
-                 title: "学習計画",
-                 message: "日ごとの計画が並び、今日の分は枠で強調されます。上下にスクロールすると、過去や先の予定も確認できます。"),
-        TourStep(tab: .chat, target: nil,
+        TourStep(tab: .chat, target: .chatFirstContact,
                  title: "チャット",
-                 message: "担当講師と 1 対 1 でやり取りできます。写真を送って質問することもできます。"),
-        TourStep(tab: .history, target: .historySummary,
-                 title: "学習の記録",
-                 message: "タイマーで記録した学習時間を、過去 7 日分のグラフで確認できます。"),
-        TourStep(tab: .settings, target: .settingsGuide,
+                 message: "担当の先生ごとにカードが並びます。開くとチャットができ、その先生との次の面談も確認できます。"),
+        TourStep(tab: .myPage, target: .myPageWeek,
+                 title: "1 週間の計画",
+                 message: "これからの 1 週間の計画が並びます。日付をタップすると、その日の計画を開けます。"),
+        TourStep(tab: .myPage, target: .myPageStats,
+                 title: "学習記録",
+                 message: "タイマーで記録した学習時間を、数字とグラフで確認できます。"),
+        TourStep(tab: .myPage, target: .myPageBusySlots,
+                 title: "使えない時間",
+                 message: "部活や塾など、勉強できない時間を登録しておくと、先生が計画を立てるときに避けてくれます。"),
+        TourStep(tab: .myPage, target: .myPageGuide,
                  title: "案内はここから見直せます",
-                 message: "この案内は「設定 > 使い方」からいつでももう一度表示できます。"),
+                 message: "この案内は「マイページ > 使い方」からいつでももう一度表示できます。"),
     ]
 }
 
@@ -108,17 +109,32 @@ final class TourController: ObservableObject {
 /// 目印の frame (ウィンドウ座標) を集める。スクロールのたびに更新されるので、
 /// ツアー表示中だけ変更を通知し、それ以外は黙って保持だけする
 /// (常に通知すると購読している画面全体が毎フレーム再描画されるため)。
+///
+/// 別タブに隠れた画面は frame を消さずに「非表示」とだけ記録する。
+/// 再表示されても位置が同じなら onGeometryChange は呼ばれないため、
+/// 消してしまうとタブを戻ったときに対象を指せなくなる。
 @MainActor
 final class TourGeometry: ObservableObject {
-    private(set) var frames: [TourTarget: CGRect] = [:]
+    private var frames: [TourTarget: CGRect] = [:]
+    private var hidden: Set<TourTarget> = []
     var isPublishing = false {
         didSet { if isPublishing { objectWillChange.send() } }
     }
 
-    func set(_ target: TourTarget, _ frame: CGRect?) {
+    func frame(of target: TourTarget) -> CGRect? {
+        hidden.contains(target) ? nil : frames[target]
+    }
+
+    func set(_ target: TourTarget, _ frame: CGRect) {
         guard frames[target] != frame else { return }
         if isPublishing { objectWillChange.send() }
         frames[target] = frame
+    }
+
+    func setVisible(_ target: TourTarget, _ visible: Bool) {
+        guard hidden.contains(target) == visible else { return }
+        if isPublishing { objectWillChange.send() }
+        if visible { hidden.remove(target) } else { hidden.insert(target) }
     }
 }
 
@@ -141,7 +157,8 @@ private struct TourTargetModifier: ViewModifier {
                 .onGeometryChange(for: CGRect.self) { $0.frame(in: .global) } action: { frame in
                     tour.geometry.set(target, frame)
                 }
-                .onDisappear { tour.geometry.set(target, nil) }
+                .onAppear { tour.geometry.setVisible(target, true) }
+                .onDisappear { tour.geometry.setVisible(target, false) }
         } else {
             content
         }
@@ -185,7 +202,7 @@ struct TourOverlay: View {
 
     /// 対象の frame を overlay 座標に直し、少し余白を足す。画面外なら nil。
     private func spotlightRect(for step: TourStep, origin: CGPoint, bounds: CGSize) -> CGRect? {
-        guard let target = step.target, let global = geometry.frames[target] else { return nil }
+        guard let target = step.target, let global = geometry.frame(of: target) else { return nil }
         let rect = global.offsetBy(dx: -origin.x, dy: -origin.y).insetBy(dx: -8, dy: -8)
         let visible = CGRect(origin: .zero, size: bounds)
         guard rect.intersects(visible) else { return nil }

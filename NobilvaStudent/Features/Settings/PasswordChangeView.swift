@@ -20,7 +20,7 @@ struct PasswordChangeView: View {
                 SecureField("もう一度入力", text: $confirm)
                     .textContentType(.newPassword)
             } footer: {
-                Text("8 文字以上で設定してください。iCloud キーチェーンに保存すれば、次回から Face ID で自動入力されます。")
+                Text("8 文字以上で設定してください。iCloud キーチェーンに保存すれば、次回から自動入力されます。")
             }
             Section {
                 Button {
@@ -43,6 +43,7 @@ struct PasswordChangeView: View {
             }
         }
         .navigationTitle("パスワード")
+        .navigationBarTitleDisplayMode(.inline)
         .errorAlert($errorMessage)
     }
 
