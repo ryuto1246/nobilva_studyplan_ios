@@ -109,13 +109,19 @@ final class AuthStore: ObservableObject, TokenProviding {
         phase = .authenticated
     }
 
+    /// サーバ (simplewebauthn) の AuthenticationResponseJSON と同じ入れ子構造。
     struct PasskeyVerifyBody: Encodable {
         struct Assertion: Encodable {
-            let credentialId: String
-            let clientDataJSON: String
-            let authenticatorData: String
-            let signature: String
-            let userHandle: String?
+            let id: String
+            let rawId: String
+            let type: String
+            let response: Response
+            struct Response: Encodable {
+                let clientDataJSON: String
+                let authenticatorData: String
+                let signature: String
+                let userHandle: String?
+            }
         }
         let assertion: Assertion
         let challenge_token: String
@@ -149,11 +155,15 @@ final class AuthStore: ObservableObject, TokenProviding {
         let assertion = try await client.login(identifier: identifier, api: api)
         let body = PasskeyVerifyBody(
             assertion: .init(
-                credentialId: assertion.credentialId,
-                clientDataJSON: assertion.clientDataJSON,
-                authenticatorData: assertion.authenticatorData,
-                signature: assertion.signature,
-                userHandle: assertion.userHandle
+                id: assertion.credentialId,
+                rawId: assertion.credentialId,
+                type: "public-key",
+                response: .init(
+                    clientDataJSON: assertion.clientDataJSON,
+                    authenticatorData: assertion.authenticatorData,
+                    signature: assertion.signature,
+                    userHandle: assertion.userHandle
+                )
             ),
             challenge_token: assertion.challengeToken
         )
@@ -401,7 +411,13 @@ final class AuthStore: ObservableObject, TokenProviding {
         let refresh_token: String
     }
 
+    /// 同時に複数のリクエストが 401 を受けても、refresh は 1 本にまとめる。
+    /// 同じ refresh_token を並行して使うと、Supabase の再利用検知で失効させられうるため。
     nonisolated func refreshTokens() async throws {
+        try await refreshCoordinator.run { [self] in try await performRefresh() }
+    }
+
+    private nonisolated func performRefresh() async throws {
         guard let stored = Keychain.get(refreshKey) else {
             throw APIError.unauthorized
         }
@@ -417,6 +433,8 @@ final class AuthStore: ObservableObject, TokenProviding {
             self.currentUser = resp.session.user
         }
     }
+
+    private nonisolated let refreshCoordinator = RefreshCoordinator()
 
     // MARK: - Logout
 
@@ -442,6 +460,8 @@ final class AuthStore: ObservableObject, TokenProviding {
             // 別ユーザーが同じ端末でログインする可能性を考慮し、キャッシュも全消去。
             DiskCache.clearAll()
             phase = .unauthenticated
+            // タイマー・未読ポーリングなど、ユーザーに紐づく端末内の状態も片付けさせる。
+            NotificationCenter.default.post(name: .userDidSignOut, object: nil)
         }
     }
 
@@ -452,5 +472,18 @@ final class AuthStore: ObservableObject, TokenProviding {
         Keychain.set(session.refreshToken, key: refreshKey)
         currentUser = session.user
         currentRole = role
+    }
+}
+
+/// 進行中の refresh を共有する (single-flight)。
+private actor RefreshCoordinator {
+    private var inFlight: Task<Void, Error>?
+
+    func run(_ work: @escaping @Sendable () async throws -> Void) async throws {
+        if let inFlight { return try await inFlight.value }
+        let task = Task { try await work() }
+        inFlight = task
+        defer { inFlight = nil }
+        try await task.value
     }
 }

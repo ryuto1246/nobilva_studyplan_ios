@@ -9,13 +9,12 @@ struct MeetingListView: View {
     @State private var errorMessage: String?
 
     var body: some View {
-        NavigationStack {
             List {
                 Toggle("過去の面談も表示", isOn: $includePast)
                     .onChange(of: includePast) { _, _ in Task { await load() } }
                 if let groups = upcomingByMonth, !groups.isEmpty {
                     ForEach(groups, id: \.month) { g in
-                        Section("これから ・ \(g.monthLabel)") {
+                        Section("これから · \(g.monthLabel)") {
                             ForEach(g.items) { row($0) }
                         }
                     }
@@ -39,15 +38,14 @@ struct MeetingListView: View {
             .refreshable { await load() }
             .overlay { if isLoading && meetings.isEmpty { ProgressView() } }
             .errorAlert($errorMessage)
-        }
     }
 
     private var upcoming: [Meeting]? {
-        let x = meetings.filter { !$0.isPast && $0.status != .cancelled }
+        let x = meetings.filter { $0.isUpcoming }
         return x.isEmpty ? nil : x.sorted { $0.scheduledStartAt < $1.scheduledStartAt }
     }
     private var past: [Meeting]? {
-        let x = meetings.filter { $0.isPast || $0.status == .cancelled }
+        let x = meetings.filter { !$0.isUpcoming }
         return x.isEmpty ? nil : x.sorted { $0.scheduledStartAt > $1.scheduledStartAt }
     }
 
@@ -75,22 +73,7 @@ struct MeetingListView: View {
         NavigationLink {
             MeetingDetailView(meetingId: m.id).environmentObject(auth)
         } label: {
-            VStack(alignment: .leading, spacing: 4) {
-                HStack {
-                    Text(m.title).font(.subheadline).bold()
-                    Spacer()
-                    Text(m.displayStatus.label)
-                        .font(.caption2).padding(.horizontal, 8).padding(.vertical, 2)
-                        .background(Color.gray.opacity(0.2)).clipShape(Capsule())
-                }
-                if let start = JSTDate.parseTimestamp(m.scheduledStartAt) {
-                    Text(JSTDate.displayLong.string(from: start) + " " + JSTDate.time.string(from: start))
-                        .font(.caption).foregroundStyle(.secondary)
-                }
-                if let tName = m.teacher?.displayName {
-                    Text(tName).font(.caption).foregroundStyle(.tertiary)
-                }
-            }
+            MeetingSummary(meeting: m, showsCountdown: m.isUpcoming)
         }
     }
 

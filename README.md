@@ -61,22 +61,17 @@ Signing & Capabilities で以下を行う (初回のみ):
 
 ## 実装済み画面 / 未実装
 
-**画面 (実装済)**:
-- ログイン (パスワード + パスキー)
-- ホーム (Dashboard summary で 1 リクエスト)
-- 計画 (期間一覧 → 日別詳細 → AI 生成)
-- タイマー (ポモドーロ / タイマー / ストップウォッチ / 手動記録)
-- タスク (CRUD, 期限切れセクション, 複製, 完了 toggle)
-- 参考書ゴール (追加 / 進捗更新 / 削除)
-- チャット (スレッド一覧, 15 秒 polling, 画像添付 (JPEG 圧縮), 既読)
-- 面談 (一覧 / 詳細 / キャンセル / リスケ希望 / 別日時提案 / 提案受諾拒否)
-- 履歴 (Swift Charts で 7 日の学習時間 + XP/レベル/ストリーク)
-- 使えない時間 (追加 / 削除 / チームイベント opt-out)
-- 設定 (アカウント / 学習 / ポモドーロ / 通知 / セキュリティ)
-- 使い方 / XP ガイド
+**タブ構成**: 今日 / チャット / マイページ の 3 つ。
+
+- **今日**: 「まずはこれ」(期限切れ → 今日の未完了の先頭) + 次にやること + 次の面談 + 日付未定タスク。行タップでタイマー、長押しで相談・編集
+- **チャット**: 先生 1 人 1 行 (スレッド未作成の先生も同じ一覧)。会話は日付区切り・お知らせ (管理者メッセージ) の区別・長押しコピー・画像の拡大
+- **マイページ**: 学習記録 / 計画一覧 / 面談 / 使えない時間 / 設定 / 使い方 / アカウント削除
+- **タイマー**: シートで開くが、状態は `StudyTimer` (アプリ全体で 1 つ・UserDefaults に永続化) が持つ。計測中はタブバー上に計測バーが出る
+
+**共通部品 (DesignSystem/)**: `StudyItemRow` (やること 1 行) / `FocusCard` / `SubjectBadge` / `MeetingSummary` / `PrimaryButton`・`SecondaryButton` / `LoadingStateView`・`RetryStateView`・`InlineEmptyState` / `SectionHeader` / `TimerAccessoryBar`。
+計画アイテムとタスクは `Models/StudyItem.swift` で同じ形に揃えてから表示する。
 
 **未実装 / 後回し**:
-- APNs プッシュ通知 (Web の LINE 通知に任せる)
 - チャットの WebSocket リアルタイム (現状 15 秒 polling)
 - LINE Login 連携 UI (endpoint は動くが LINE SDK を仕込んでない)
 - パスキー "登録" (mobile API 未実装。Web で登録する導線を Settings に置いてある)

@@ -1,6 +1,6 @@
 import SwiftUI
 
-/// XP / ストリーク等の数字を大きく見せるカード。
+/// 学習時間などの数字を大きく見せるカード。
 struct StatCard: View {
     let label: String
     let value: String

@@ -20,9 +20,9 @@ struct ChatTaskCard: Codable, Hashable {
         return ChatTaskCard(title: title, subject: subject, amount: planAmountLabel(title: title, minutes: durationMinutes))
     }
 
-    /// タスクベース (StudentTask 等) 用。`約{formatMinutes(minutes)}` 固定。
+    /// タスクベース (StudentTask 等) 用。Web の taskToActionable と同じく「約」は付けない。
     static func fromTask(title: String, subject: String, estimatedMinutes: Int) -> ChatTaskCard {
-        return ChatTaskCard(title: title, subject: subject, amount: "約\(formatMinutes(estimatedMinutes))")
+        return ChatTaskCard(title: title, subject: subject, amount: formatMinutes(estimatedMinutes))
     }
 }
 

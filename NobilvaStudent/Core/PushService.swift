@@ -19,6 +19,8 @@ final class PushService: NSObject {
     private weak var api: APIClient?
     /// 未送信のトークン (hex)。attach 後に flush する。
     private var pendingTokenHex: String?
+    /// サーバに登録済みのこの端末のトークン。サインアウト時にこの端末分だけ消すのに使う。
+    private var registeredTokenHex: String?
 
     private override init() {
         super.init()
@@ -58,10 +60,16 @@ final class PushService: NSObject {
 
     /// サインアウト時に呼ぶ。サーバ側のデバイストークン行を消しつつローカルもクリア。
     func unregisterOnSignOut() async {
+        let token = registeredTokenHex ?? pendingTokenHex
         pendingTokenHex = nil
+        registeredTokenHex = nil
         guard let api else { return }
         do {
-            let _: OKResponse = try await api.delete("/api/v1/student/settings/apns")
+            // device_token を付けると、他の端末の通知は止めずにこの端末の分だけ消える。
+            let _: OKResponse = try await api.delete(
+                "/api/v1/student/settings/apns",
+                query: token.map { ["device_token": $0] } ?? [:]
+            )
         } catch {
             // 落ちても致命ではないので warn だけ。
             Log.ui.error("APNs unregister failed: \(String(describing: error))")
@@ -82,7 +90,11 @@ final class PushService: NSObject {
                     "/api/v1/student/settings/apns",
                     body: body
                 )
-                await MainActor.run { self?.pendingTokenHex = nil }
+                await MainActor.run {
+                    self?.registeredTokenHex = hex
+                    // 送信中に新しいトークンが届いていたら消さずに残す。
+                    if self?.pendingTokenHex == hex { self?.pendingTokenHex = nil }
+                }
             } catch {
                 // 失敗時は pendingTokenHex を残し、次の attach / register で再送される。
                 Log.ui.error("APNs token register failed: \(String(describing: error))")

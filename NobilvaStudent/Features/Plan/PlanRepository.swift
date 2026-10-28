@@ -16,13 +16,4 @@ struct PlanRepository {
     func fetchDay(_ date: String) async throws -> PlanForDate {
         try await api.get("/api/v1/student/plan", query: ["date": date])
     }
-
-    struct StatusBody: Encodable { let status: String }
-
-    func setItemStatus(_ id: String, status: PlanItemStatus) async throws {
-        let _: EmptyResponse = try await api.patch(
-            "/api/v1/student/plan/items/\(id)/status",
-            body: StatusBody(status: status.rawValue)
-        )
-    }
 }

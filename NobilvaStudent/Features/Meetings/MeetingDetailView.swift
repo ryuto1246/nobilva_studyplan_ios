@@ -9,6 +9,8 @@ private enum ReschedulePhase {
     case requestedByOther     // 相手が希望を送ってきた (自分が具体提案する番)
     case proposedByMe         // 自分が具体日時を提案した (相手待ち)
     case proposedByOther      // 相手が具体日時を提案してきた (承認/対案/見送る)
+
+    var isMine: Bool { self == .requestedByMe || self == .proposedByMe }
 }
 
 struct MeetingDetailView: View {
@@ -16,20 +18,19 @@ struct MeetingDetailView: View {
     let meetingId: String
 
     @State private var meeting: Meeting?
-    @State private var isLoading = false
+    @State private var isLoading = true
     @State private var errorMessage: String?
 
-    // action state
     @State private var showCancelConfirm = false
+    @State private var showAcceptConfirm = false
     @State private var showRequestSheet = false
     @State private var showProposalSheet = false
+    @State private var showRejectSheet = false
     @State private var busy = false
-
-    private var currentUserId: String? { auth.currentUser?.id }
 
     private var phase: ReschedulePhase {
         guard let m = meeting else { return .none }
-        let iAmActor = m.rescheduleActor != nil && m.rescheduleActor == currentUserId
+        let iAmActor = m.rescheduleActor != nil && m.rescheduleActor == auth.currentUser?.id
         switch m.rescheduleState {
         case .requested: return iAmActor ? .requestedByMe : .requestedByOther
         case .proposed: return iAmActor ? .proposedByMe : .proposedByOther
@@ -37,356 +38,328 @@ struct MeetingDetailView: View {
         }
     }
 
+    private var repo: MeetingsRepository { MeetingsRepository(api: auth.api) }
+
     var body: some View {
-        ScrollView {
-            VStack(alignment: .leading, spacing: 16) {
-                if let m = meeting {
-                    header(m)
-                    if let url = m.meetingUrl, let u = URL(string: url) {
-                        Link(destination: u) {
-                            Label("会議に参加", systemImage: "video.fill")
-                                .frame(maxWidth: .infinity).padding(.vertical, 8)
-                        }
-                        .buttonStyle(.borderedProminent)
-                    }
-                    if let notes = m.notes, !notes.isEmpty {
-                        Card {
-                            VStack(alignment: .leading, spacing: 4) {
-                                Text("メモ").font(.caption).foregroundStyle(.secondary)
-                                Text(notes)
-                            }
-                        }
-                    }
-
-                    // phase != .none の時だけ状況パネル (混在ボタン回避)
-                    if phase != .none && m.status == .scheduled && !m.isPast {
-                        reschedulePanel(m)
-                    }
-
-                    // NONE 時だけ通常アクションバー
-                    if phase == .none && m.status == .scheduled && !m.isPast {
-                        VStack(spacing: 10) {
-                            Button {
-                                showRequestSheet = true
-                            } label: {
-                                Label("リスケを希望する", systemImage: "arrow.triangle.2.circlepath")
-                                    .frame(maxWidth: .infinity)
-                            }
-                            .buttonStyle(.bordered)
-                        }
-                    }
-                }
+        Group {
+            if let m = meeting {
+                content(m)
+            } else if isLoading {
+                LoadingStateView()
+            } else {
+                RetryStateView { await load() }
             }
-            .padding(20)
         }
         .background(Theme.groupedBackground.ignoresSafeArea())
-        .navigationTitle("面談詳細")
+        .navigationTitle("面談")
         .navigationBarTitleDisplayMode(.inline)
         .task { await load() }
         .refreshable { await load() }
-        .overlay { if isLoading && meeting == nil { ProgressView() } }
         .errorAlert($errorMessage)
         .confirmationDialog("この面談をキャンセルしますか？", isPresented: $showCancelConfirm, titleVisibility: .visible) {
-            Button("キャンセルする", role: .destructive) { Task { await cancel() } }
+            Button("面談をキャンセル", role: .destructive) { Task { await perform { try await repo.cancel(meetingId, note: nil) } } }
+        } message: {
+            Text("先生に通知されます。日程を変えたいだけなら「日程の変更を希望する」を使ってください。")
+        }
+        .confirmationDialog("提案された日時で確定しますか？", isPresented: $showAcceptConfirm, titleVisibility: .visible) {
+            Button("この日時で確定") { Task { await perform { try await repo.acceptProposal(meetingId) } } }
         }
         .sheet(isPresented: $showRequestSheet) {
-            NoteSheet(title: "リスケ希望を送る",
-                      description: "相手に「日程を変えたい」ことを伝えます。新しい日時は相手が提案します。",
-                      requireNote: true) { note in
-                Task { await requestReschedule(note: note) }
+            NoteSheet(title: "日程の変更を希望",
+                      description: "先生に「日程を変えたい」ことを伝えます。新しい日時は先生が提案します。",
+                      placeholder: "例: 塾があるので別の日にしたいです",
+                      requireNote: true, submitLabel: "送信") { note in
+                try await repo.requestReschedule(meetingId, note: note)
+                await load()
+            }
+        }
+        .sheet(isPresented: $showRejectSheet) {
+            NoteSheet(title: "提案を見送る",
+                      description: "提案された日時は都合が合わないことを先生に伝えます。",
+                      placeholder: "例: その日は部活があります",
+                      requireNote: false, submitLabel: "見送る") { note in
+                try await repo.rejectProposal(meetingId, note: note)
+                await load()
             }
         }
         .sheet(isPresented: $showProposalSheet) {
             ProposalSheet { start, duration, note in
-                Task { await propose(start: start, duration: duration, note: note) }
+                try await repo.proposeReschedule(meetingId, start: start, durationMinutes: duration, note: note)
+                await load()
             }
+        }
+    }
+
+    private func content(_ m: Meeting) -> some View {
+        ScrollView {
+            VStack(alignment: .leading, spacing: 16) {
+                header(m)
+                if let url = m.joinURL {
+                    Link(destination: url) {
+                        Label("面談に参加", systemImage: "video.fill")
+                            .font(.body.weight(.semibold))
+                            .frame(maxWidth: .infinity, minHeight: 34)
+                    }
+                    .buttonStyle(.borderedProminent)
+                }
+                if let notes = m.notes, !notes.isEmpty {
+                    infoBox(title: "メモ", body: notes)
+                }
+                if m.isUpcoming {
+                    if phase == .none {
+                        VStack(spacing: 4) {
+                            SecondaryButton("日程の変更を希望する", systemImage: "arrow.triangle.2.circlepath") {
+                                showRequestSheet = true
+                            }
+                            Button("面談をキャンセル", role: .destructive) { showCancelConfirm = true }
+                                .frame(minHeight: 44)
+                        }
+                        .disabled(busy)
+                    } else {
+                        reschedulePanel(m)
+                    }
+                }
+            }
+            .padding(16)
         }
     }
 
     private func header(_ m: Meeting) -> some View {
-        Card {
-            VStack(alignment: .leading, spacing: 6) {
-                Text(m.title).font(.headline)
-                if let start = JSTDate.parseTimestamp(m.scheduledStartAt),
-                   let end = JSTDate.parseTimestamp(m.scheduledEndAt) {
-                    Text("\(JSTDate.displayLong.string(from: start)) \(JSTDate.time.string(from: start))〜\(JSTDate.time.string(from: end))")
-                        .font(.subheadline).foregroundStyle(.secondary)
-                }
-                HStack(spacing: 12) {
-                    Label(m.displayStatus.label, systemImage: "circle.fill")
-                        .font(.caption)
-                    if let t = m.teacher?.displayName {
-                        Label(t, systemImage: "person.fill").font(.caption).foregroundStyle(.secondary)
-                    }
-                }
+        VStack(alignment: .leading, spacing: 8) {
+            HStack(alignment: .firstTextBaseline) {
+                Text(m.title).font(.title3.bold())
+                Spacer()
+                StatusBadge(text: m.displayStatus.label,
+                            tint: m.displayStatus.tint == "orange" ? .orange : .secondary)
             }
+            if let start = m.startDate, let end = JSTDate.parseTimestamp(m.scheduledEndAt) {
+                Text("\(JSTDate.displayMonthDay.string(from: start)) \(JSTDate.time.string(from: start))〜\(JSTDate.time.string(from: end))")
+                    .font(.body)
+            }
+            HStack(spacing: 12) {
+                if let c = m.countdownLabel { Text(c).foregroundStyle(Theme.accent) }
+                if let t = m.teacher?.displayName { Label(t, systemImage: "person.fill").foregroundStyle(.secondary) }
+            }
+            .font(.subheadline)
         }
+        .padding(16)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(Theme.secondaryBackground, in: RoundedRectangle(cornerRadius: Theme.cardCorner, style: .continuous))
     }
 
-    /// リスケ状況パネル。phase に応じて「今の状況」+「あなたが次にすべきこと」+
-    /// アクションボタンをまとめて出す。混在ボタン回避のため他の通常アクション
-    /// (リスケ希望を送る) は phase == .none のときだけ外側に出す。
+    private func infoBox(title: String, body: String) -> some View {
+        VStack(alignment: .leading, spacing: 4) {
+            Text(title).font(.caption).foregroundStyle(.secondary)
+            Text(body).font(.subheadline)
+        }
+        .padding(12)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(Theme.secondaryBackground, in: RoundedRectangle(cornerRadius: 12, style: .continuous))
+    }
+
     @ViewBuilder
     private func reschedulePanel(_ m: Meeting) -> some View {
-        Card {
-            VStack(alignment: .leading, spacing: 12) {
-                HStack(alignment: .top, spacing: 8) {
-                    Image(systemName: "info.circle.fill")
-                        .foregroundStyle(.orange)
-                    VStack(alignment: .leading, spacing: 4) {
-                        Text(phaseTitle).font(.subheadline).bold()
-                        Text(phaseHint).font(.caption).foregroundStyle(.secondary)
-                    }
-                }
-
-                // 提案されている日時 (proposed 時のみ)
-                if let proposed = m.proposedStartAt,
-                   let d = JSTDate.parseTimestamp(proposed),
-                   (phase == .proposedByMe || phase == .proposedByOther) {
-                    VStack(alignment: .leading, spacing: 2) {
-                        Text("提案されている日時").font(.caption).foregroundStyle(.secondary)
-                        Text(JSTDate.displayLong.string(from: d) + " " + JSTDate.time.string(from: d))
-                            .font(.subheadline)
-                    }
-                    .padding(10)
-                    .background(RoundedRectangle(cornerRadius: 8).fill(Color(uiColor: .secondarySystemBackground)))
-                }
-
-                if let note = m.rescheduleNote, !note.isEmpty {
-                    VStack(alignment: .leading, spacing: 2) {
-                        Text("相手のメモ").font(.caption).foregroundStyle(.secondary)
-                        Text(note).font(.subheadline)
-                    }
-                    .padding(10)
-                    .background(RoundedRectangle(cornerRadius: 8).fill(Color(uiColor: .secondarySystemBackground)))
-                }
-
-                phaseActions
+        VStack(alignment: .leading, spacing: 12) {
+            VStack(alignment: .leading, spacing: 4) {
+                Label(phaseTitle, systemImage: phase.isMine ? "hourglass" : "exclamationmark.circle.fill")
+                    .font(.headline)
+                    .foregroundStyle(phase.isMine ? Color.secondary : Color.orange)
+                Text(phaseHint).font(.subheadline).foregroundStyle(.secondary)
             }
+            if let proposed = m.proposedStartAt, let d = JSTDate.parseTimestamp(proposed),
+               phase == .proposedByMe || phase == .proposedByOther {
+                infoBox(title: "提案されている日時",
+                        body: JSTDate.displayMonthDay.string(from: d) + " " + JSTDate.time.string(from: d))
+            }
+            if let note = m.rescheduleNote, !note.isEmpty {
+                infoBox(title: phase.isMine ? "あなたが送ったメモ" : "先生からのメモ", body: note)
+            }
+            phaseActions
         }
+        .padding(16)
+        .background(Theme.secondaryBackground, in: RoundedRectangle(cornerRadius: Theme.cardCorner, style: .continuous))
     }
 
     private var phaseTitle: String {
         switch phase {
-        case .requestedByMe: return "リスケ希望を送信しました"
-        case .requestedByOther: return "相手からリスケ希望が届いています"
-        case .proposedByMe: return "新しい日程を提案しました"
-        case .proposedByOther: return "新しい日程が提案されています"
+        case .requestedByMe: return "日程の変更を希望しています"
+        case .requestedByOther: return "先生が日程の変更を希望しています"
+        case .proposedByMe: return "新しい日時を提案しました"
+        case .proposedByOther: return "先生から新しい日時の提案があります"
         case .none: return ""
         }
     }
 
     private var phaseHint: String {
         switch phase {
-        case .requestedByMe, .proposedByMe: return "相手の返答を待っています。"
-        case .requestedByOther: return "あなたのすべきこと: 新しい日程を提案してください。"
-        case .proposedByOther: return "あなたのすべきこと: 承認・別日を提案・見送る のいずれかを選んでください。"
+        case .requestedByMe, .proposedByMe: return "先生の返事を待っています。"
+        case .requestedByOther: return "都合のよい日時を提案してください。"
+        case .proposedByOther: return "確定するか、別の日時を提案するか、見送るかを選んでください。"
         case .none: return ""
         }
     }
 
     @ViewBuilder
     private var phaseActions: some View {
-        switch phase {
-        case .requestedByOther:
-            VStack(spacing: 8) {
-                Button {
-                    showProposalSheet = true
-                } label: {
-                    Label("新しい日程を提案する", systemImage: "calendar.badge.plus")
-                        .frame(maxWidth: .infinity)
+        VStack(spacing: 8) {
+            switch phase {
+            case .requestedByOther:
+                // 相手の希望は取り下げられない (サーバが拒否する) ので、提案だけ。
+                PrimaryButton("新しい日時を提案する", systemImage: "calendar.badge.plus") { showProposalSheet = true }
+            case .proposedByOther:
+                PrimaryButton("この日時で確定", systemImage: "checkmark") { showAcceptConfirm = true }
+                SecondaryButton("別の日時を提案", systemImage: "calendar.badge.plus") { showProposalSheet = true }
+                Button("見送る", role: .destructive) { showRejectSheet = true }
+                    .frame(minHeight: 44)
+            case .requestedByMe, .proposedByMe:
+                SecondaryButton("取り下げる", systemImage: "arrow.uturn.backward", isLoading: busy) {
+                    Task { await perform { try await repo.withdrawReschedule(meetingId) } }
                 }
-                .buttonStyle(.borderedProminent)
-                .disabled(busy)
-                Button {
-                    Task { await withdraw() }
-                } label: {
-                    Label("希望を取り下げる", systemImage: "arrow.uturn.backward")
-                        .frame(maxWidth: .infinity)
-                }
-                .buttonStyle(.bordered)
-                .disabled(busy)
+            case .none:
+                EmptyView()
             }
-        case .proposedByOther:
-            VStack(spacing: 8) {
-                Button {
-                    Task { await acceptProposal() }
-                } label: {
-                    Label("この日時で承認", systemImage: "checkmark.circle.fill")
-                        .frame(maxWidth: .infinity)
-                }
-                .buttonStyle(.borderedProminent)
-                .disabled(busy)
-                Button {
-                    showProposalSheet = true
-                } label: {
-                    Label("別の日を提案", systemImage: "calendar.badge.plus")
-                        .frame(maxWidth: .infinity)
-                }
-                .buttonStyle(.bordered)
-                .disabled(busy)
-                Button(role: .destructive) {
-                    Task { await rejectProposal() }
-                } label: {
-                    Label("見送る (相手に返す)", systemImage: "arrow.uturn.backward")
-                        .frame(maxWidth: .infinity)
-                }
-                .buttonStyle(.bordered)
-                .disabled(busy)
-            }
-        case .requestedByMe, .proposedByMe:
-            Button {
-                Task { await withdraw() }
-            } label: {
-                Label("取り下げる", systemImage: "arrow.uturn.backward")
-                    .frame(maxWidth: .infinity)
-            }
-            .buttonStyle(.bordered)
-            .disabled(busy)
-        case .none:
-            EmptyView()
         }
+        .disabled(busy)
     }
 
     // MARK: - Actions
 
     private func load() async {
-        isLoading = true; defer { isLoading = false }
-        do { meeting = try await MeetingsRepository(api: auth.api).detail(meetingId) }
-        catch let e as APIError { errorMessage = e.errorDescription }
-        catch { errorMessage = "読み込みに失敗しました" }
+        isLoading = true
+        defer { isLoading = false }
+        do {
+            meeting = try await repo.detail(meetingId)
+        } catch {
+            // 表示中のデータがあるときは、更新失敗のたびにアラートを出さない。
+            if meeting == nil, (error as? APIError)?.isCancelled != true {
+                errorMessage = (error as? APIError)?.errorDescription ?? "読み込めませんでした"
+            }
+        }
     }
 
-    private func cancel() async {
-        busy = true; defer { busy = false }
-        do { try await MeetingsRepository(api: auth.api).cancel(meetingId, note: nil); await load() }
-        catch let e as APIError { errorMessage = e.errorDescription }
-        catch { errorMessage = "キャンセルに失敗しました" }
-    }
-
-    private func requestReschedule(note: String?) async {
-        busy = true; defer { busy = false }
-        do { try await MeetingsRepository(api: auth.api).requestReschedule(meetingId, note: note); await load() }
-        catch let e as APIError { errorMessage = e.errorDescription }
-        catch { errorMessage = "送信に失敗しました" }
-    }
-
-    private func propose(start: Date, duration: Int, note: String?) async {
-        busy = true; defer { busy = false }
-        do { try await MeetingsRepository(api: auth.api).proposeReschedule(meetingId, start: start, durationMinutes: duration, note: note); await load() }
-        catch let e as APIError { errorMessage = e.errorDescription }
-        catch { errorMessage = "提案に失敗しました" }
-    }
-
-    private func acceptProposal() async {
-        busy = true; defer { busy = false }
-        do { try await MeetingsRepository(api: auth.api).acceptProposal(meetingId); await load() }
-        catch let e as APIError { errorMessage = e.errorDescription }
-        catch { errorMessage = "処理に失敗しました" }
-    }
-
-    private func rejectProposal() async {
-        busy = true; defer { busy = false }
-        do { try await MeetingsRepository(api: auth.api).rejectProposal(meetingId, note: nil); await load() }
-        catch let e as APIError { errorMessage = e.errorDescription }
-        catch { errorMessage = "処理に失敗しました" }
-    }
-
-    private func withdraw() async {
-        busy = true; defer { busy = false }
-        do { try await MeetingsRepository(api: auth.api).withdrawReschedule(meetingId); await load() }
-        catch let e as APIError { errorMessage = e.errorDescription }
-        catch { errorMessage = "取り下げに失敗しました" }
+    private func perform(_ op: () async throws -> Void) async {
+        busy = true
+        defer { busy = false }
+        do {
+            try await op()
+            await load()
+            NotificationCenter.default.post(name: .studyDataDidChange, object: nil)
+        } catch {
+            errorMessage = (error as? APIError)?.errorDescription ?? "処理できませんでした"
+        }
     }
 }
 
 // MARK: - Sheets
 
+/// メモ付きで何かを送るシート。送信が成功してから閉じる。
 private struct NoteSheet: View {
     @Environment(\.dismiss) var dismiss
     let title: String
     let description: String?
-    /// true のときはメモが空だと送信不可 (リスケ希望など理由必須のケース向け)
+    let placeholder: String
     let requireNote: Bool
-    let onSubmit: (String?) -> Void
+    let submitLabel: String
+    let onSubmit: (String?) async throws -> Void
 
-    @State private var note: String = ""
+    @State private var note = ""
+    @State private var isSending = false
+    @State private var errorMessage: String?
 
-    init(
-        title: String,
-        description: String? = nil,
-        requireNote: Bool = false,
-        onSubmit: @escaping (String?) -> Void,
-    ) {
-        self.title = title
-        self.description = description
-        self.requireNote = requireNote
-        self.onSubmit = onSubmit
-    }
+    private var trimmed: String { note.trimmingCharacters(in: .whitespacesAndNewlines) }
 
     var body: some View {
         NavigationStack {
             Form {
                 if let description {
-                    Section {
-                        Text(description).font(.footnote).foregroundStyle(.secondary)
-                    }
+                    Section { Text(description).font(.subheadline).foregroundStyle(.secondary) }
                 }
                 Section(requireNote ? "理由" : "メッセージ (任意)") {
-                    TextField(requireNote ? "例: 塾があるので別の日にしたい" : "メッセージ",
-                              text: $note, axis: .vertical)
-                        .lineLimit(2...6)
-                }
-                Section {
-                    Button {
-                        onSubmit(note.isEmpty ? nil : note)
-                        dismiss()
-                    } label: { Text("送信").bold().frame(maxWidth: .infinity) }
-                    .buttonStyle(.borderedProminent)
-                    .disabled(requireNote && note.trimmingCharacters(in: .whitespaces).isEmpty)
+                    TextField(placeholder, text: $note, axis: .vertical).lineLimit(2...6)
                 }
             }
             .navigationTitle(title)
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
-                ToolbarItem(placement: .topBarLeading) { Button("キャンセル") { dismiss() } }
+                ToolbarItem(placement: .cancellationAction) { Button("キャンセル") { dismiss() } }
+                ToolbarItem(placement: .confirmationAction) {
+                    if isSending { ProgressView() } else {
+                        Button(submitLabel) { Task { await submit() } }
+                            .disabled(requireNote && trimmed.isEmpty)
+                    }
+                }
             }
+            .interactiveDismissDisabled(isSending || !trimmed.isEmpty)
+            .errorAlert($errorMessage)
+        }
+    }
+
+    private func submit() async {
+        isSending = true
+        defer { isSending = false }
+        do {
+            try await onSubmit(trimmed.isEmpty ? nil : trimmed)
+            dismiss()
+        } catch {
+            errorMessage = (error as? APIError)?.errorDescription ?? "送信できませんでした"
         }
     }
 }
 
 private struct ProposalSheet: View {
     @Environment(\.dismiss) var dismiss
-    let onSubmit: (Date, Int, String?) -> Void
+    let onSubmit: (Date, Int, String?) async throws -> Void
 
-    @State private var start: Date = Date().addingTimeInterval(60 * 60 * 24)
+    @State private var start: Date = ProposalSheet.defaultStart()
     @State private var duration: Int = 60
-    @State private var note: String = ""
+    @State private var note = ""
+    @State private var isSending = false
+    @State private var errorMessage: String?
+
+    /// 明日の同じ時刻を 15 分単位に丸めた値。
+    private static func defaultStart() -> Date {
+        let tomorrow = Date().addingTimeInterval(60 * 60 * 24)
+        let interval = 15.0 * 60
+        return Date(timeIntervalSinceReferenceDate: (tomorrow.timeIntervalSinceReferenceDate / interval).rounded(.up) * interval)
+    }
 
     var body: some View {
         NavigationStack {
             Form {
                 Section("提案する日時") {
-                    DatePicker("開始", selection: $start)
-                        .environment(\.locale, Locale(identifier: "ja_JP"))
-                    Stepper("時間: \(duration) 分", value: $duration, in: 15...240, step: 15)
+                    DatePicker("開始", selection: $start, in: Date()...)
+                        .environment(\.timeZone, JSTDate.timeZone)
+                        .environment(\.calendar, JSTDate.calendar)
+                    Picker("長さ", selection: $duration) {
+                        ForEach([15, 30, 45, 60, 90, 120], id: \.self) { m in Text(formatMinutes(m)).tag(m) }
+                    }
                 }
                 Section("メモ (任意)") {
                     TextField("メモ", text: $note, axis: .vertical).lineLimit(2...5)
                 }
-                Section {
-                    Button {
-                        onSubmit(start, duration, note.isEmpty ? nil : note)
-                        dismiss()
-                    } label: { Text("提案する").bold().frame(maxWidth: .infinity) }
-                    .buttonStyle(.borderedProminent)
-                }
             }
-            .navigationTitle("日程を提案")
+            .navigationTitle("日時を提案")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
-                ToolbarItem(placement: .topBarLeading) { Button("キャンセル") { dismiss() } }
+                ToolbarItem(placement: .cancellationAction) { Button("キャンセル") { dismiss() } }
+                ToolbarItem(placement: .confirmationAction) {
+                    if isSending { ProgressView() } else { Button("提案") { Task { await submit() } } }
+                }
             }
+            .interactiveDismissDisabled(isSending)
+            .errorAlert($errorMessage)
+        }
+    }
+
+    private func submit() async {
+        isSending = true
+        defer { isSending = false }
+        let memo = note.trimmingCharacters(in: .whitespacesAndNewlines)
+        do {
+            try await onSubmit(start, duration, memo.isEmpty ? nil : memo)
+            dismiss()
+        } catch {
+            errorMessage = (error as? APIError)?.errorDescription ?? "提案できませんでした"
         }
     }
 }

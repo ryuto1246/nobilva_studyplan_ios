@@ -9,6 +9,9 @@ struct TimerRing: View {
     var tint: Color = .accentColor
     var lineWidth: CGFloat = 12
 
+    /// 文字サイズ設定に合わせて拡大する (上限はリングの内側に収まる程度)。
+    @ScaledMetric(relativeTo: .largeTitle) private var digitSize: CGFloat = 52
+
     var body: some View {
         ZStack {
             Circle()
@@ -21,13 +24,18 @@ struct TimerRing: View {
 
             VStack(spacing: 6) {
                 Text(label)
-                    .font(.system(size: 44, weight: .bold, design: .rounded).monospacedDigit())
+                    .font(.system(size: min(digitSize, 72), weight: .bold, design: .rounded).monospacedDigit())
+                    .minimumScaleFactor(0.5)
+                    .lineLimit(1)
                 if let subLabel {
                     Text(subLabel)
                         .font(.subheadline)
                         .foregroundStyle(.secondary)
                 }
             }
+            .padding(lineWidth * 2)
         }
+        .accessibilityElement(children: .ignore)
+        .accessibilityLabel([label, subLabel].compactMap { $0 }.joined(separator: "、"))
     }
 }

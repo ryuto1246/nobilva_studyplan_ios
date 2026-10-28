@@ -1,44 +1,39 @@
 import SwiftUI
 
-/// アプリの使い方説明ページ。静的テキスト。
+/// アプリの使い方 (マイページ > 使い方)。今の画面構成に合わせた静的な説明。
 struct GuideView: View {
+    private struct Topic: Identifiable {
+        let id = UUID()
+        let title: String
+        let systemImage: String
+        let body: String
+    }
+
+    private let topics: [Topic] = [
+        Topic(title: "今日やること", systemImage: "checklist",
+              body: "「今日」タブを開くと、いちばん先に取り組むことが「まずはこれ」として大きく表示されます。終わったら「完了」を押すか、丸いチェックをタップします。期限を過ぎたタスクも同じ並びに入ります。"),
+        Topic(title: "タイマーで記録する", systemImage: "timer",
+              body: "「取り組む」を押すとタイマーが開きます。閉じても計測は続き、画面下のバーからいつでも戻れます。終わったら「記録する」を押すと、学習時間が記録され、その計画は完了になります。"),
+        Topic(title: "先生に相談する", systemImage: "bubble.left",
+              body: "やることを長押しするか、「まずはこれ」の「先生に相談する」から、その内容について先生にチャットで相談できます。"),
+        Topic(title: "面談", systemImage: "person.2",
+              body: "次の面談は「今日」タブに表示されます。日程の変更を希望するときや、過去の面談を見るときは「マイページ > 面談」から開きます。"),
+        Topic(title: "使えない時間", systemImage: "clock.badge.xmark",
+              body: "部活や塾など勉強できない時間を「マイページ > 使えない時間」に登録しておくと、先生が計画を立てるときに避けてくれます。"),
+    ]
+
     var body: some View {
-        NavigationStack {
-            ScrollView {
-                VStack(alignment: .leading, spacing: 16) {
-                    Card {
-                        VStack(alignment: .leading, spacing: 6) {
-                            Label("AI 計画", systemImage: "sparkles").font(.headline)
-                            Text("計画タブ右上の ✨ ボタンから、開始日〜終了日を指定して AI に日次計画を作らせられます。「参考書ゴール」を先に登録しておくと、期限から逆算した精度の高い計画が生成されます。")
-                                .font(.subheadline).foregroundStyle(.secondary)
-                        }
-                    }
-                    Card {
-                        VStack(alignment: .leading, spacing: 6) {
-                            Label("タイマー", systemImage: "timer").font(.headline)
-                            Text("計画アイテムやタスクの右にある ▶ ボタンからタイマーを起動できます。ポモドーロ / カウントダウン / ストップウォッチ / 手動記録 の 4 モード対応。")
-                                .font(.subheadline).foregroundStyle(.secondary)
-                        }
-                    }
-                    Card {
-                        VStack(alignment: .leading, spacing: 6) {
-                            Label("チャット / 面談", systemImage: "bubble.left.and.bubble.right.fill").font(.headline)
-                            Text("担当講師と 1:1 でチャットできます。写真を添付して質問することも可能。面談は「その他 > 面談」からキャンセル・別日時提案などができます。")
-                                .font(.subheadline).foregroundStyle(.secondary)
-                        }
-                    }
-                    Card {
-                        VStack(alignment: .leading, spacing: 6) {
-                            Label("使えない時間", systemImage: "clock.badge.exclamationmark").font(.headline)
-                            Text("部活や塾など「勉強に使えない時間」を登録しておくと、AI 計画作成時に自動で除外されます。")
-                                .font(.subheadline).foregroundStyle(.secondary)
-                        }
-                    }
-                }
-                .padding(20)
+        List(topics) { t in
+            VStack(alignment: .leading, spacing: 6) {
+                Label(t.title, systemImage: t.systemImage)
+                    .font(.headline)
+                Text(t.body)
+                    .font(.subheadline)
+                    .foregroundStyle(.secondary)
             }
-            .background(Theme.groupedBackground.ignoresSafeArea())
-            .navigationTitle("使い方")
+            .padding(.vertical, 4)
         }
+        .navigationTitle("使い方")
+        .navigationBarTitleDisplayMode(.inline)
     }
 }

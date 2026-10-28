@@ -2,39 +2,67 @@ import SwiftUI
 import PhotosUI
 import UIKit
 
+/// 1 人の先生との会話。
+/// - スレッドがまだ無い先生は、最初の読み込み時に作る
+/// - 会話中はタブバーを隠す (メッセージ系アプリの標準)
+/// - 日付の区切り・お知らせ (管理者メッセージ) の区別・長押しコピー・画像の拡大
 struct ChatRoomView: View {
     @EnvironmentObject var auth: AuthStore
-    let threadId: String
+    @EnvironmentObject var chatUnread: ChatUnreadStore
+    @Environment(\.scenePhase) private var scenePhase
+
+    let teacherId: String?
     let title: String
+    @State private var threadId: String?
 
     @State private var messages: [ChatMessage] = []
-    @State private var draft: String = ""
-    @State private var isSending = false
-    @State private var isLoading = false
+    @State private var pending: [PendingMessage] = []
+    @State private var draft = ""
+    @State private var isLoading = true
     @State private var errorMessage: String?
-    @State private var pollingTask: Task<Void, Never>?
     @State private var photoPickerItem: PhotosPickerItem?
-
-    // 送信直後の optimistic 表示用
-    @State private var optimistic: [ChatMessage] = []
-
+    @State private var viewingImage: URL?
+    /// 最後のメッセージが画面内にあるか (新着で自動スクロールしてよいか)。
+    @State private var isAtBottom = true
     @FocusState private var isInputFocused: Bool
 
+    private static let maxLength = 2000
+
+    init(threadId: String?, teacherId: String?, title: String) {
+        self.teacherId = teacherId
+        self.title = title
+        _threadId = State(initialValue: threadId)
+    }
+
+    /// 送信中・失敗した自分のメッセージ (サーバに届くまでの仮表示)。
+    struct PendingMessage: Identifiable, Equatable {
+        let id = UUID()
+        let body: String?
+        let imageData: Data?
+        var failed = false
+    }
+
     var body: some View {
-        VStack(spacing: 0) {
-            messageScroll
-            Divider()
-            composer
-        }
-        .navigationTitle(title)
-        .navigationBarTitleDisplayMode(.inline)
-        .task {
-            await load()
-            await markRead()
-            startPolling()
-        }
-        .onDisappear { stopPolling() }
-        .errorAlert($errorMessage)
+        messageScroll
+            .safeAreaInset(edge: .bottom, spacing: 0) { composer }
+            .navigationTitle(title)
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar(.hidden, for: .tabBar)
+            .task {
+                await load(initial: true)
+                // 画面を開いている間だけ 15 秒ごとに取り直す (.task なので閉じると自動で止まる)。
+                while !Task.isCancelled {
+                    try? await Task.sleep(nanoseconds: 15_000_000_000)
+                    if Task.isCancelled { break }
+                    await load()
+                }
+            }
+            .onChange(of: scenePhase) { _, p in if p == .active { Task { await load() } } }
+            .onDisappear { Task { await chatUnread.refresh() } }
+            .errorAlert($errorMessage)
+            .fullScreenCover(item: $viewingImage) { url in
+                ChatImageViewer(url: url)
+            }
     }
 
     // MARK: - Message list
@@ -42,269 +70,301 @@ struct ChatRoomView: View {
     private var messageScroll: some View {
         ScrollViewReader { proxy in
             ScrollView {
-                LazyVStack(spacing: 8) {
-                    ForEach(messages + optimistic) { m in
-                        MessageBubble(message: m, isMine: isMineMessage(m))
-                            .id(m.id)
+                LazyVStack(spacing: 6) {
+                    if isLoading && messages.isEmpty {
+                        ProgressView().padding(.top, 40)
+                    } else if messages.isEmpty && pending.isEmpty {
+                        Text("まだメッセージはありません。\nわからないことを気軽に聞いてみましょう。")
+                            .font(.subheadline)
+                            .foregroundStyle(.secondary)
+                            .multilineTextAlignment(.center)
+                            .padding(.top, 60)
                     }
+                    ForEach(dayGroups, id: \.day) { group in
+                        DaySeparator(text: group.label)
+                        ForEach(group.messages) { m in
+                            messageView(m)
+                        }
+                    }
+                    ForEach(pending) { p in
+                        PendingBubble(message: p,
+                                      retry: { Task { await resend(p) } },
+                                      discard: { pending.removeAll { $0.id == p.id } })
+                    }
+                    Color.clear.frame(height: 1).id("bottom")
+                        .onAppear { isAtBottom = true }
+                        .onDisappear { isAtBottom = false }
                 }
-                .padding(12)
+                .padding(.horizontal, 12)
+                .padding(.vertical, 8)
             }
-            .background(Theme.groupedBackground)
+            .defaultScrollAnchor(.bottom)
             .scrollDismissesKeyboard(.interactively)
-            .refreshable { await load() }
-            .onChange(of: (messages + optimistic).last?.id) { _, newId in
-                if let id = newId {
-                    withAnimation { proxy.scrollTo(id, anchor: .bottom) }
-                }
+            .background(Theme.groupedBackground)
+            .onChange(of: messages.last?.id) { _, _ in
+                if isAtBottom { withAnimation { proxy.scrollTo("bottom", anchor: .bottom) } }
             }
-            // キーボード出現時、ScrollView が縮んで最下部メッセージが隠れるので追従スクロール
+            .onChange(of: pending.count) { old, new in
+                if new > old { withAnimation { proxy.scrollTo("bottom", anchor: .bottom) } }
+            }
             .onChange(of: isInputFocused) { _, focused in
-                guard focused, let last = (messages + optimistic).last?.id else { return }
+                guard focused else { return }
                 DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) {
-                    withAnimation { proxy.scrollTo(last, anchor: .bottom) }
+                    withAnimation { proxy.scrollTo("bottom", anchor: .bottom) }
                 }
             }
         }
     }
 
-    private func isMineMessage(_ m: ChatMessage) -> Bool {
-        guard let mine = auth.currentUser?.id else { return false }
-        return m.senderId == mine
+    @ViewBuilder
+    private func messageView(_ m: ChatMessage) -> some View {
+        if m.isAdminMessage == true {
+            NoticeMessage(message: m)
+        } else {
+            MessageBubble(message: m, isMine: m.senderId == auth.currentUser?.id) { url in
+                viewingImage = url
+            }
+        }
     }
 
-    // MARK: - Composer (iMessage 風、iOS 26 Liquid Glass 対応)
+    private struct DayGroup { let day: String; let label: String; let messages: [ChatMessage] }
+
+    /// JST の日付ごとにまとめる。
+    private var dayGroups: [DayGroup] {
+        var groups: [DayGroup] = []
+        for m in messages {
+            let date = JSTDate.parseTimestamp(m.createdAt) ?? Date()
+            let day = JSTDate.iso.string(from: date)
+            if let last = groups.last, last.day == day {
+                groups[groups.count - 1] = DayGroup(day: day, label: last.label, messages: last.messages + [m])
+            } else {
+                groups.append(DayGroup(day: day, label: JSTDate.dayHeader(date), messages: [m]))
+            }
+        }
+        return groups
+    }
+
+    // MARK: - Composer
+
+    private var trimmedDraft: String { draft.trimmingCharacters(in: .whitespacesAndNewlines) }
+    private var canSend: Bool { !trimmedDraft.isEmpty && trimmedDraft.count <= Self.maxLength }
 
     private var composer: some View {
-        HStack(alignment: .bottom, spacing: 10) {
-            attachButton
-            inputCapsule
-        }
-        .padding(.horizontal, 12)
-        .padding(.top, 8)
-        .padding(.bottom, 10)
-    }
-
-    /// 左端の "+" ボタン。写真ピッカーを起動。
-    /// composer は alignment: .bottom のため、Capsule 1 行時 (高さ ≒ 44) に
-    /// + ボタン (34) の中心を Capsule の中心と揃えるため padding.bottom 5 を追加。
-    /// 複数行に膨らんだ Capsule でも + は下端から 5px 上に固定される (iMessage 的)。
-    private var attachButton: some View {
-        PhotosPicker(selection: $photoPickerItem, matching: .images) {
-            Image(systemName: "plus")
-                .font(.system(size: 18, weight: .semibold))
-                .frame(width: 34, height: 34)
-                .foregroundStyle(.secondary)
-                .background {
-                    let shape = Circle()
-                    if #available(iOS 26.0, *) {
-                        shape.fill(.background).glassEffect(.regular, in: shape)
-                    } else {
-                        shape.fill(Theme.secondaryBackground)
-                    }
+        VStack(spacing: 4) {
+            if trimmedDraft.count > Self.maxLength - 200 {
+                Text("\(trimmedDraft.count) / \(Self.maxLength)")
+                    .font(.caption.monospacedDigit())
+                    .foregroundStyle(trimmedDraft.count > Self.maxLength ? .red : .secondary)
+                    .frame(maxWidth: .infinity, alignment: .trailing)
+            }
+            HStack(alignment: .bottom, spacing: 8) {
+                PhotosPicker(selection: $photoPickerItem, matching: .images) {
+                    Image(systemName: "photo")
+                        .font(.system(size: 20))
+                        .foregroundStyle(.secondary)
+                        .frame(width: 44, height: 44)
+                        .contentShape(Rectangle())
                 }
-        }
-        .padding(.bottom, 5)
-        .onChange(of: photoPickerItem) { _, item in
-            guard let item else { return }
-            Task { await handlePickedImage(item) }
-        }
-    }
+                .accessibilityLabel("写真を送る")
+                .onChange(of: photoPickerItem) { _, item in
+                    guard let item else { return }
+                    Task { await handlePickedImage(item) }
+                }
 
-    /// テキスト入力 + 内蔵送信ボタン。
-    /// 形状は RoundedRectangle 固定 (cornerRadius: 22) にして、行数が増えても
-    /// Capsule のように歪まない → 内側の送信ボタンが切れる問題を解消。
-    /// 1 行時は高さ ≒ 44 で、22 の corner radius により見た目カプセルに近い。
-    private var inputCapsule: some View {
-        let shape = RoundedRectangle(cornerRadius: 22, style: .continuous)
-        let canSend = !isSending && !draft.trimmingCharacters(in: .whitespaces).isEmpty
-        return HStack(alignment: .bottom, spacing: 6) {
-            TextField("メッセージ", text: $draft, axis: .vertical)
-                .textFieldStyle(.plain)
-                .lineLimit(1...6)
-                .focused($isInputFocused)
-                .padding(.leading, 16)
-                // 1 行時に送信ボタンと垂直中心を合わせるための余白。
-                // ボタン (30) + padding.bottom (7) = 37 で、TextField 側は
-                // padding.vertical (11) * 2 + line height ≒ 22 = 44 に対して
-                // ボタン中心 22.5 と TextField 中心 22 が概ね揃う。
-                .padding(.vertical, 11)
-
-            Button {
-                Task { await send() }
-            } label: {
-                Image(systemName: "arrow.up")
-                    .font(.system(size: 15, weight: .bold))
-                    .foregroundStyle(.white)
-                    .frame(width: 30, height: 30)
-                    .background(canSend ? Theme.accent : Color.gray.opacity(0.45))
-                    .clipShape(Circle())
-            }
-            .buttonStyle(.plain)
-            .disabled(!canSend)
-            .padding(.trailing, 6)
-            .padding(.bottom, 7)
-        }
-        .background {
-            if #available(iOS 26.0, *) {
-                shape.fill(.background).glassEffect(.regular, in: shape)
-            } else {
-                shape.fill(Theme.secondaryBackground)
+                HStack(alignment: .bottom, spacing: 4) {
+                    TextField("メッセージ", text: $draft, axis: .vertical)
+                        .lineLimit(1...6)
+                        .focused($isInputFocused)
+                        .padding(.leading, 14)
+                        .padding(.vertical, 10)
+                    Button {
+                        Task { await send() }
+                    } label: {
+                        Image(systemName: "arrow.up.circle.fill")
+                            .font(.system(size: 30))
+                            .foregroundStyle(canSend ? Theme.accent : Color.gray.opacity(0.4))
+                            .frame(width: 44, height: 44)
+                            .contentShape(Rectangle())
+                    }
+                    .buttonStyle(.plain)
+                    .disabled(!canSend)
+                    .accessibilityLabel("送信")
+                }
+                .background(Theme.secondaryBackground, in: RoundedRectangle(cornerRadius: 22, style: .continuous))
+                .overlay(RoundedRectangle(cornerRadius: 22, style: .continuous)
+                    .strokeBorder(Theme.separator.opacity(0.4), lineWidth: 0.5))
             }
         }
-        .overlay {
-            shape.strokeBorder(Theme.separator.opacity(0.4), lineWidth: 0.5)
-        }
-        .clipShape(shape)
+        .padding(.horizontal, 8)
+        .padding(.vertical, 6)
+        .background(.bar)
     }
 
-    // MARK: - Polling
+    // MARK: - Loading
 
-    private func startPolling() {
-        pollingTask?.cancel()
-        pollingTask = Task {
-            while !Task.isCancelled {
-                try? await Task.sleep(nanoseconds: 15_000_000_000)
-                if Task.isCancelled { break }
-                await load(silent: true)
-            }
-        }
-    }
+    private func repo() -> ChatRepository { ChatRepository(api: auth.api) }
 
-    private func stopPolling() {
-        pollingTask?.cancel()
-        pollingTask = nil
-    }
-
-    // MARK: - Actions
-
-    private func load(silent: Bool = false) async {
-        if !silent { isLoading = true }
-        defer { if !silent { isLoading = false } }
+    private func load(initial: Bool = false) async {
+        defer { isLoading = false }
         do {
-            messages = try await ChatRepository(api: auth.api).messages(threadId: threadId)
-            // optimistic の中でサーバに到達したものは差し引く (body が同じもの)
-            optimistic = optimistic.filter { opt in
-                !messages.contains { $0.body == opt.body && $0.imageUrl == opt.imageUrl }
+            if threadId == nil {
+                guard let teacherId else { return }
+                threadId = try await repo().createOrGetThread(teacherId: teacherId).threadId
             }
-        } catch let e as APIError {
-            if !silent { errorMessage = e.errorDescription }
+            guard let threadId else { return }
+            let fetched = try await repo().messages(threadId: threadId)
+            let hadNew = fetched.last?.id != messages.last?.id
+            messages = fetched
+            if initial || hadNew {
+                // 開いている間に届いたものも既読にする。
+                try? await repo().markRead(threadId: threadId)
+            }
         } catch {
-            if !silent { errorMessage = "読み込みに失敗しました" }
+            if initial, (error as? APIError)?.isCancelled != true {
+                errorMessage = (error as? APIError)?.errorDescription ?? "メッセージを読み込めませんでした"
+            }
         }
     }
 
-    private func markRead() async {
-        do { try await ChatRepository(api: auth.api).markRead(threadId: threadId) } catch {}
-    }
+    // MARK: - Sending
 
     private func send() async {
-        let text = draft.trimmingCharacters(in: .whitespaces)
-        guard !text.isEmpty else { return }
+        let text = trimmedDraft
+        guard canSend else { return }
         draft = ""
-        isSending = true; defer { isSending = false }
+        let p = PendingMessage(body: text, imageData: nil)
+        pending.append(p)
+        await deliver(p)
+    }
 
-        // optimistic
-        let temp = ChatMessage(id: "temp-\(UUID().uuidString)", threadId: threadId, senderId: auth.currentUser?.id,
-                                senderName: nil, body: text, imageUrl: nil, isAdminMessage: false,
-                                createdAt: ISO8601DateFormatter().string(from: Date()))
-        optimistic.append(temp)
+    private func resend(_ p: PendingMessage) async {
+        guard let idx = pending.firstIndex(of: p) else { return }
+        pending[idx].failed = false
+        await deliver(pending[idx])
+    }
 
+    /// 送信して、成功したら一覧を取り直して仮表示を消す。失敗したら「再送」を出す (本文は残す)。
+    private func deliver(_ p: PendingMessage) async {
         do {
-            _ = try await ChatRepository(api: auth.api).send(threadId: threadId, body: text)
-            await load(silent: true)
-        } catch let e as APIError {
-            errorMessage = e.errorDescription
-            optimistic.removeAll { $0.id == temp.id }
+            guard let threadId else { throw APIError.invalidResponse }
+            if let data = p.imageData {
+                _ = try await repo().sendImage(threadId: threadId, imageData: data, contentType: "image/jpeg", caption: nil)
+            } else if let body = p.body {
+                _ = try await repo().send(threadId: threadId, body: body)
+            }
+            messages = (try? await repo().messages(threadId: threadId)) ?? messages
+            pending.removeAll { $0.id == p.id }
         } catch {
-            errorMessage = "送信に失敗しました"
-            optimistic.removeAll { $0.id == temp.id }
+            if let idx = pending.firstIndex(where: { $0.id == p.id }) { pending[idx].failed = true }
         }
     }
 
     private func handlePickedImage(_ item: PhotosPickerItem) async {
         defer { photoPickerItem = nil }
-        guard let data = try? await item.loadTransferable(type: Data.self) else { return }
-        // 長辺 1600px + JPEG 圧縮
-        guard let uiimg = UIImage(data: data),
-              let jpeg = compressImage(uiimg, longEdge: 1600, quality: 0.7) else {
-            errorMessage = "画像の変換に失敗しました"; return
+        guard let data = try? await item.loadTransferable(type: Data.self),
+              let image = UIImage(data: data),
+              let jpeg = Self.compress(image, longEdge: 1600, quality: 0.7) else {
+            errorMessage = "この画像は送れませんでした。別の写真を選んでください。"
+            return
         }
-        do {
-            _ = try await ChatRepository(api: auth.api).sendImage(
-                threadId: threadId,
-                imageData: jpeg,
-                contentType: "image/jpeg",
-                caption: nil
-            )
-            await load(silent: true)
-        } catch let e as APIError {
-            errorMessage = e.errorDescription
-        } catch {
-            errorMessage = "画像の送信に失敗しました"
-        }
+        let p = PendingMessage(body: nil, imageData: jpeg)
+        pending.append(p)
+        await deliver(p)
     }
 
-    private func compressImage(_ image: UIImage, longEdge: CGFloat, quality: CGFloat) -> Data? {
+    private static func compress(_ image: UIImage, longEdge: CGFloat, quality: CGFloat) -> Data? {
         let size = image.size
         let scale = min(1.0, longEdge / max(size.width, size.height))
         let target = CGSize(width: size.width * scale, height: size.height * scale)
         let format = UIGraphicsImageRendererFormat()
         format.scale = 1
-        let renderer = UIGraphicsImageRenderer(size: target, format: format)
-        let resized = renderer.image { _ in image.draw(in: CGRect(origin: .zero, size: target)) }
+        let resized = UIGraphicsImageRenderer(size: target, format: format).image { _ in
+            image.draw(in: CGRect(origin: .zero, size: target))
+        }
         return resized.jpegData(compressionQuality: quality)
     }
 }
 
-// MARK: - Bubble
+extension URL: @retroactive Identifiable {
+    public var id: String { absoluteString }
+}
 
-private struct MessageBubble: View {
-    let message: ChatMessage
-    let isMine: Bool
+// MARK: - Parts
 
-    /// 吹き出しと時刻を横並びに: iMessage 同様「自分は右端に吹き出し・その左に小さく時刻」、
-    /// 「相手は左端に吹き出し・その右に小さく時刻」を出す。
-    /// 縦方向の "隙間" を吹き出しの下に作らない。
+private struct DaySeparator: View {
+    let text: String
     var body: some View {
-        HStack(alignment: .bottom, spacing: 6) {
-            if isMine {
-                Spacer(minLength: 40)
-                timeText
-                bubble
-            } else {
-                bubble
-                timeText
-                Spacer(minLength: 40)
-            }
-        }
+        Text(text)
+            .font(.caption.weight(.semibold))
+            .foregroundStyle(.secondary)
+            .padding(.horizontal, 10)
+            .padding(.vertical, 3)
+            .background(Theme.secondaryBackground, in: Capsule())
+            .padding(.vertical, 8)
+            .accessibilityAddTraits(.isHeader)
     }
+}
 
-    private var timeText: some View {
-        Group {
+/// 管理者 (運営) からのお知らせ。先生の発言と区別するため吹き出しにせず中央に置く。
+private struct NoticeMessage: View {
+    let message: ChatMessage
+
+    var body: some View {
+        VStack(spacing: 4) {
+            Label("お知らせ", systemImage: "megaphone.fill")
+                .font(.caption.weight(.semibold))
+                .foregroundStyle(.secondary)
+            if let body = message.body, !body.isEmpty {
+                Text(body)
+                    .font(.footnote)
+                    .multilineTextAlignment(.center)
+                    .textSelection(.enabled)
+            }
             if let ts = JSTDate.parseTimestamp(message.createdAt) {
                 Text(JSTDate.time.string(from: ts))
                     .font(.caption2)
                     .foregroundStyle(.tertiary)
             }
         }
+        .padding(12)
+        .frame(maxWidth: 320)
+        .background(Theme.secondaryBackground.opacity(0.6), in: RoundedRectangle(cornerRadius: 12, style: .continuous))
+        .overlay(RoundedRectangle(cornerRadius: 12, style: .continuous)
+            .strokeBorder(Theme.separator.opacity(0.4), style: StrokeStyle(lineWidth: 0.5, dash: [3])))
+        .frame(maxWidth: .infinity)
+        .padding(.vertical, 4)
+        .accessibilityElement(children: .combine)
+    }
+}
+
+private struct MessageBubble: View {
+    let message: ChatMessage
+    let isMine: Bool
+    let onTapImage: (URL) -> Void
+
+    var body: some View {
+        HStack(alignment: .bottom, spacing: 6) {
+            if isMine { Spacer(minLength: 48); timeText }
+            content
+            if !isMine { timeText; Spacer(minLength: 48) }
+        }
     }
 
     @ViewBuilder
-    private var bubble: some View {
-        // ::task::{JSON} プレフィックスがあればカード付き吹き出し、無ければ通常の文字吹き出し。
+    private var timeText: some View {
+        if let ts = JSTDate.parseTimestamp(message.createdAt) {
+            Text(JSTDate.time.string(from: ts))
+                .font(.caption2)
+                .foregroundStyle(.tertiary)
+        }
+    }
+
+    @ViewBuilder
+    private var content: some View {
         let parsed = message.body.flatMap { ChatTaskCardParser.parse($0) }
         VStack(alignment: isMine ? .trailing : .leading, spacing: 4) {
-            if let url = message.imageUrl, let u = URL(string: url) {
-                AsyncImage(url: u) { img in
-                    img.resizable().scaledToFit()
-                } placeholder: {
-                    RoundedRectangle(cornerRadius: 10).fill(Theme.groupedBackground)
-                        .frame(width: 160, height: 120)
-                        .overlay(ProgressView())
-                }
-                .frame(maxWidth: 240)
-                .clipShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
+            if let s = message.imageUrl, let url = URL(string: s) {
+                ChatImageThumbnail(url: url) { onTapImage(url) }
             }
             if let parsed {
                 VStack(alignment: .leading, spacing: 6) {
@@ -313,48 +373,163 @@ private struct MessageBubble: View {
                         Text(parsed.message)
                     }
                 }
-                .padding(.horizontal, 12).padding(.vertical, 10)
-                .background(isMine ? Theme.accent : Theme.secondaryBackground)
-                .foregroundStyle(isMine ? .white : Color.primary)
-                .clipShape(RoundedRectangle(cornerRadius: 18, style: .continuous))
+                .bubble(isMine: isMine)
+                .copyable(parsed.message)
             } else if let body = message.body, !body.isEmpty {
                 Text(body)
-                    .padding(.horizontal, 12).padding(.vertical, 8)
-                    .background(isMine ? Theme.accent : Theme.secondaryBackground)
-                    .foregroundStyle(isMine ? .white : Color.primary)
-                    .clipShape(RoundedRectangle(cornerRadius: 18, style: .continuous))
+                    .bubble(isMine: isMine)
+                    .copyable(body)
+            }
+        }
+    }
+}
+
+private struct PendingBubble: View {
+    let message: ChatRoomView.PendingMessage
+    let retry: () -> Void
+    let discard: () -> Void
+
+    var body: some View {
+        HStack(alignment: .bottom, spacing: 6) {
+            Spacer(minLength: 48)
+            if message.failed {
+                Menu {
+                    Button("もう一度送る", action: retry)
+                    Button("削除", role: .destructive, action: discard)
+                } label: {
+                    Image(systemName: "exclamationmark.circle.fill")
+                        .font(.title3)
+                        .foregroundStyle(.red)
+                        .frame(width: 44, height: 44)
+                }
+                .accessibilityLabel("送信できませんでした")
+            } else {
+                ProgressView().controlSize(.small)
+            }
+            Group {
+                if let data = message.imageData, let img = UIImage(data: data) {
+                    Image(uiImage: img)
+                        .resizable().scaledToFit()
+                        .frame(maxWidth: 200, maxHeight: 240)
+                        .clipShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
+                } else if let body = message.body {
+                    Text(body).bubble(isMine: true)
+                }
+            }
+            .opacity(message.failed ? 1 : 0.6)
+        }
+    }
+}
+
+private struct ChatImageThumbnail: View {
+    let url: URL
+    let onTap: () -> Void
+
+    var body: some View {
+        AsyncImage(url: url) { phase in
+            switch phase {
+            case .success(let img):
+                img.resizable().scaledToFit()
+            case .failure:
+                Label("画像を表示できません", systemImage: "photo")
+                    .font(.footnote).foregroundStyle(.secondary)
+                    .frame(width: 180, height: 120)
+                    .background(Theme.secondaryBackground)
+            default:
+                Theme.secondaryBackground.frame(width: 180, height: 140).overlay(ProgressView())
+            }
+        }
+        .frame(maxWidth: 240, maxHeight: 320)
+        .clipShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
+        .onTapGesture(perform: onTap)
+        .accessibilityAddTraits(.isButton)
+        .accessibilityLabel("画像。タップで拡大")
+    }
+}
+
+/// 画像の全画面表示。ピンチで拡大、共有シートから保存できる。
+private struct ChatImageViewer: View {
+    let url: URL
+    @Environment(\.dismiss) private var dismiss
+    @State private var scale: CGFloat = 1
+    @State private var image: UIImage?
+
+    var body: some View {
+        NavigationStack {
+            ZStack {
+                Color.black.ignoresSafeArea()
+                if let image {
+                    Image(uiImage: image)
+                        .resizable().scaledToFit()
+                        .scaleEffect(scale)
+                        .gesture(MagnifyGesture()
+                            .onChanged { scale = max(1, $0.magnification) }
+                            .onEnded { _ in withAnimation { scale = 1 } })
+                } else {
+                    ProgressView().tint(.white)
+                }
+            }
+            .toolbar {
+                ToolbarItem(placement: .cancellationAction) { Button("閉じる") { dismiss() } }
+                if let image {
+                    ToolbarItem(placement: .primaryAction) {
+                        ShareLink(item: Image(uiImage: image), preview: SharePreview("画像", image: Image(uiImage: image)))
+                    }
+                }
+            }
+            .toolbarBackground(.black, for: .navigationBar)
+            .toolbarColorScheme(.dark, for: .navigationBar)
+            .task {
+                if let (data, _) = try? await URLSession.shared.data(from: url) { image = UIImage(data: data) }
             }
         }
     }
 }
 
 /// 吹き出し内に埋め込まれる「相談元タスク」の小カード。
-/// Web 側 TaskCardMessage と同じ情報: 科目ドット + 科目名 + 量 + タイトル。
 private struct TaskCardChip: View {
     let card: ChatTaskCard
     let isMine: Bool
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 2) {
+        VStack(alignment: .leading, spacing: 4) {
             HStack(spacing: 6) {
-                Circle()
-                    .fill(Theme.subjectColor(card.subject))
-                    .frame(width: 8, height: 8)
-                Text(card.subject).font(.caption)
+                if !card.subject.isEmpty {
+                    if isMine {
+                        Text(card.subject).font(.caption.weight(.semibold))
+                    } else {
+                        SubjectBadge(subject: card.subject)
+                    }
+                }
                 if !card.amount.isEmpty {
-                    Text("·").font(.caption).opacity(0.6)
                     Text(card.amount).font(.caption)
                 }
             }
-            .foregroundStyle(isMine ? Color.white.opacity(0.85) : Theme.secondaryLabel)
-
+            .foregroundStyle(isMine ? Color.white.opacity(0.9) : Theme.secondaryLabel)
             Text(card.title)
                 .font(.subheadline.weight(.semibold))
                 .foregroundStyle(isMine ? .white : Color.primary)
         }
         .padding(.horizontal, 10).padding(.vertical, 8)
         .frame(maxWidth: .infinity, alignment: .leading)
-        .background(isMine ? Color.white.opacity(0.15) : Color.black.opacity(0.06))
-        .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
+        .background(isMine ? Color.white.opacity(0.18) : Color(UIColor.tertiarySystemFill),
+                    in: RoundedRectangle(cornerRadius: 12, style: .continuous))
+    }
+}
+
+private extension View {
+    func bubble(isMine: Bool) -> some View {
+        self
+            .padding(.horizontal, 12).padding(.vertical, 8)
+            .background(isMine ? Theme.accent : Theme.secondaryBackground,
+                        in: RoundedRectangle(cornerRadius: 18, style: .continuous))
+            .foregroundStyle(isMine ? .white : Color.primary)
+    }
+
+    /// 長押しでコピー (iOS のメッセージと同じ)。
+    func copyable(_ text: String) -> some View {
+        contextMenu {
+            Button { UIPasteboard.general.string = text } label: { Label("コピー", systemImage: "doc.on.doc") }
+        }
     }
 }

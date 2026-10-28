@@ -1,5 +1,6 @@
 import SwiftUI
 import AuthenticationServices
+import LocalAuthentication
 
 struct LoginView: View {
     @EnvironmentObject var auth: AuthStore
@@ -8,6 +9,7 @@ struct LoginView: View {
     @State private var password: String = ""
     @State private var isPasswordVisible: Bool = false
     @State private var isSubmitting = false
+    @State private var isPasskeySubmitting = false
     @State private var errorMessage: String?
     @FocusState private var focused: Field?
     @State private var showRecoverySheet = false
@@ -61,8 +63,9 @@ struct LoginView: View {
             Image("NobilvaLogo")
                 .resizable()
                 .scaledToFit()
-                .frame(height: 44)
-                .padding(.top, 4)
+                .frame(height: 64)
+                .padding(.top, 8)
+                .accessibilityLabel("Nobilva")
             VStack(alignment: .leading, spacing: 8) {
                 if let name = remembered?.displayName, !name.isEmpty {
                     Text("おかえりなさい")
@@ -76,9 +79,6 @@ struct LoginView: View {
                 } else {
                     Text("ログイン")
                         .font(.largeTitle.bold())
-                    Text("Face ID で素早くログインできます。")
-                        .font(.subheadline)
-                        .foregroundStyle(.secondary)
                 }
             }
         }
@@ -94,15 +94,14 @@ struct LoginView: View {
                 Task { await tryPasskey() }
             } label: {
                 HStack(spacing: 8) {
-                    if isSubmitting { ProgressView().tint(.white) }
-                    Image(systemName: "faceid")
-                    Text(remembered != nil ? "Face ID で続ける" : "Face ID でログイン").bold()
+                    if isPasskeySubmitting { ProgressView().tint(.white) } else { Image(systemName: Self.biometry.symbol) }
+                    Text(remembered != nil ? "\(Self.biometry.name)で続ける" : "\(Self.biometry.name)でログイン").bold()
                 }
                 .frame(maxWidth: .infinity)
                 .padding(.vertical, 4)
             }
             .buttonStyle(.borderedProminent)
-            .disabled(isSubmitting)
+            .disabled(isSubmitting || isPasskeySubmitting)
 
             if let hint = passkeyHint {
                 passkeyHintView(hint)
@@ -174,8 +173,8 @@ struct LoginView: View {
                 .frame(maxWidth: .infinity)
                 .padding(.vertical, 4)
             }
-            .glassOrBorderedButtonStyle()
-            .disabled(isSubmitting || identifier.isEmpty || password.isEmpty)
+            .buttonStyle(.bordered)
+            .disabled(isSubmitting || isPasskeySubmitting || identifier.isEmpty || password.isEmpty)
         }
     }
 
@@ -189,6 +188,8 @@ struct LoginView: View {
                 .autocorrectionDisabled()
                 .textInputAutocapitalization(.never)
                 .focused($focused, equals: .identifier)
+                .submitLabel(.next)
+                .onSubmit { focused = .password }
         }
         .padding(.horizontal, 16)
         .padding(.vertical, 14)
@@ -201,6 +202,8 @@ struct LoginView: View {
         }
         .overlay { shape.strokeBorder(Theme.separator.opacity(0.35), lineWidth: 0.5) }
         .clipShape(shape)
+        .contentShape(shape)
+        .onTapGesture { focused = .identifier }
     }
 
     private var passwordField: some View {
@@ -227,12 +230,15 @@ struct LoginView: View {
             } label: {
                 Image(systemName: isPasswordVisible ? "eye.slash" : "eye")
                     .foregroundStyle(.secondary)
-                    .frame(width: 24, height: 24)
+                    .frame(width: 44, height: 44)
+                    .contentShape(Rectangle())
             }
             .buttonStyle(.plain)
+            .accessibilityLabel(isPasswordVisible ? "パスワードを隠す" : "パスワードを表示")
         }
-        .padding(.horizontal, 16)
-        .padding(.vertical, 14)
+        .padding(.leading, 16)
+        .padding(.trailing, 4)
+        .padding(.vertical, 4)
         .background {
             if #available(iOS 26.0, *) {
                 shape.fill(.background).glassEffect(.regular, in: shape)
@@ -242,6 +248,8 @@ struct LoginView: View {
         }
         .overlay { shape.strokeBorder(Theme.separator.opacity(0.35), lineWidth: 0.5) }
         .clipShape(shape)
+        .contentShape(shape)
+        .onTapGesture { focused = .password }
     }
 
     private var recoveryButton: some View {
@@ -277,22 +285,38 @@ struct LoginView: View {
     private func tryPasskey() async {
         errorMessage = nil
         passkeyHint = nil
-        isSubmitting = true
-        defer { isSubmitting = false }
+        isPasskeySubmitting = true
+        defer { isPasskeySubmitting = false }
         do {
             let id = identifier.trimmingCharacters(in: .whitespaces)
             try await auth.loginWithPasskey(identifier: id.isEmpty ? nil : id)
         } catch let e as ASAuthorizationError where e.code == .canceled {
             // ユーザーが Face ID シートを閉じたケース。案内は不要。
             return
+        } catch let e as APIError where e.isNetwork {
+            passkeyHint = e.errorDescription
+        } catch let e as APIError {
+            // サーバ側の検証に失敗 (期限切れ・未登録の credential など)。
+            passkeyHint = "\(e.errorDescription ?? "ログインできませんでした。") パスワードでもログインできます。"
+            focused = .password
         } catch {
-            // credential 未登録 / タイムアウト / ネットワーク等はまとめて
-            // 「まずはパスワードで」の inline 案内に集約する。エラーの型で
-            // 細かく分岐しても正しく判定できないため、方針として単純化。
-            passkeyHint = "この端末にパスキーがまだ登録されていない可能性があります。下のパスワードでログインしてから、設定 > パスキーで登録できます。"
+            // 端末にパスキーが無い・システム側で中断された など。
+            passkeyHint = "この端末でパスキーを使えませんでした。下のパスワードでログインしてから、マイページ > パスキー・パスワードで登録できます。"
             focused = .password
         }
     }
+
+    /// 端末の生体認証に合わせた表記。生体認証が無い端末は「パスキー」。
+    private static let biometry: (name: String, symbol: String) = {
+        let ctx = LAContext()
+        _ = ctx.canEvaluatePolicy(.deviceOwnerAuthenticationWithBiometrics, error: nil)
+        switch ctx.biometryType {
+        case .faceID: return ("Face ID ", "faceid")
+        case .touchID: return ("Touch ID ", "touchid")
+        case .opticID: return ("Optic ID ", "opticid")
+        default: return ("パスキー", "person.badge.key")
+        }
+    }()
 }
 
 /// 「入れない時」用のメール送信シート。

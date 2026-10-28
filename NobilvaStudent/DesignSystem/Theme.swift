@@ -14,9 +14,21 @@ enum Theme {
     static let cardPadding: CGFloat = 16
     static let rowVerticalSpacing: CGFloat = 12
 
-    /// 科目名から安定した色を導く (ハッシュベース)。
-    /// 同じ科目は常に同じ色になる。
+    /// 科目の色。Web (lib/gamification.ts SUBJECT_DOT_COLORS) と同じ割り当て。
+    /// 5 教科以外はすべて「その他」の灰色。
     static func subjectColor(_ subject: String) -> Color {
+        switch subject {
+        case "数学": return .blue
+        case "英語": return .green
+        case "国語": return .red
+        case "理科": return .purple
+        case "社会": return Color(red: 0.85, green: 0.55, blue: 0.0)
+        default: return .gray
+        }
+    }
+
+    /// 名前から安定した色を導く (ハッシュベース)。アバター用。
+    static func avatarColor(_ name: String) -> Color {
         let palette: [Color] = [
             .init(red: 0.31, green: 0.63, blue: 0.95),
             .init(red: 0.94, green: 0.55, blue: 0.35),
@@ -27,7 +39,7 @@ enum Theme {
             .init(red: 0.40, green: 0.72, blue: 0.78)
         ]
         var hash = 5381
-        for scalar in subject.unicodeScalars {
+        for scalar in name.unicodeScalars {
             hash = ((hash << 5) &+ hash) &+ Int(scalar.value)
         }
         return palette[abs(hash) % palette.count]

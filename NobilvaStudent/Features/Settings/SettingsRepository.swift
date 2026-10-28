@@ -27,22 +27,23 @@ struct SettingsRepository {
         let _: EmptyResponse = try await api.patch("/api/v1/student/settings/pomodoro", body: body)
     }
 
-    func notifications() async throws -> NotificationPreferences {
+    /// `/profile/user-info` には student が含まれないため、学習設定・ポモドーロ・
+    /// 招待コードはこちらから取る。
+    func studentProfile() async throws -> StudentProfile {
+        try await api.get("/api/v1/student/profile/student")
+    }
+
+    /// 行がまだ無いユーザーは null が返るので optional。
+    func notifications() async throws -> NotificationPreferences? {
         try await api.get("/api/v1/student/settings/notifications")
     }
 
+    /// サーバ (lib/domain/line.ts) は camelCase で読み、未指定のキーは既定値で上書きする。
+    /// そのため 3 項目すべてを毎回送る。
     struct NotificationPatchBody: Encodable {
-        var morning_reminder: Bool?
-        var morning_reminder_time: String?
-        var plan_reminders: Bool?
-        var plan_reminder_minutes: Int?
-        var evening_summary: Bool?
-        var evening_summary_time: String?
-        var streak_alerts: Bool?
-        var quiet_hours_start: String?
-        var quiet_hours_end: String?
-        var meeting_reminders: Bool?
-        var meeting_reminder_minutes: Int?
+        let chatNotifications: Bool
+        let meetingReminders: Bool
+        let meetingReminderMinutes: Int
     }
 
     func patchNotifications(_ body: NotificationPatchBody) async throws {

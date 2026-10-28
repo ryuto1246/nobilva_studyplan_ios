@@ -1,98 +1,108 @@
 import SwiftUI
 import Charts
 
+/// 学習記録 (マイページから push)。直近 7 日の学習時間を日ごとに見せる。
 struct HistoryView: View {
     @EnvironmentObject var auth: AuthStore
 
-    struct DailyStat: Identifiable {
-        let id: String
-        let date: Date
-        let minutes: Int
-        let label: String
-    }
-
-    @State private var stats: [DailyStat] = []
-    @State private var totalMinutes: Int = 0
-    @State private var isLoading = false
+    @State private var stats: StudyStats?
+    @State private var isLoading = true
     @State private var errorMessage: String?
 
     var body: some View {
-        NavigationStack {
-            ScrollView {
-                VStack(spacing: 16) {
-                    summaryRow
-                    chartCard
-                    if let msg = errorMessage {
-                        Text(msg).font(.footnote).foregroundStyle(.red)
-                    }
-                }
-                .padding(20)
+        Group {
+            if let stats {
+                content(stats)
+            } else if isLoading {
+                LoadingStateView()
+            } else {
+                ScrollView { RetryStateView { await load() }.padding(.top, 80) }
             }
-            .background(Theme.groupedBackground.ignoresSafeArea())
-            .navigationTitle("履歴")
-            .task { await load() }
-            .refreshable { await load() }
         }
+        .background(Theme.groupedBackground.ignoresSafeArea())
+        .navigationTitle("学習記録")
+        .task { await load() }
+        .refreshable { await load() }
+        .errorAlert($errorMessage)
     }
 
-    private var summaryRow: some View {
-        HStack(spacing: 10) {
-            StatCard(label: "過去 7 日合計", value: "\(totalMinutes) 分", systemImage: "clock", tint: .accentColor)
-            StatCard(label: "1 日平均", value: "\(totalMinutes / 7) 分", systemImage: "chart.bar.fill", tint: .green)
-        }
-    }
-
-    private var chartCard: some View {
-        Card {
-            VStack(alignment: .leading, spacing: 8) {
-                Text("過去 7 日の学習時間 (分)").font(.headline)
-                if stats.isEmpty {
-                    Text(isLoading ? "読み込み中…" : "データがありません")
-                        .font(.subheadline).foregroundStyle(.secondary)
-                        .padding(.vertical, 30).frame(maxWidth: .infinity)
-                } else {
-                    Chart(stats) { s in
-                        BarMark(x: .value("日付", s.label), y: .value("分", s.minutes))
-                            .foregroundStyle(Theme.accent)
-                    }
-                    .chartYAxis {
-                        AxisMarks(position: .leading)
-                    }
-                    .frame(height: 180)
+    private func content(_ s: StudyStats) -> some View {
+        ScrollView {
+            VStack(alignment: .leading, spacing: 16) {
+                HStack(spacing: 12) {
+                    StatCard(label: "今日", value: formatMinutes(s.todayMinutes), systemImage: "sun.max")
+                    StatCard(label: "直近7日", value: formatMinutes(s.totalMinutes), systemImage: "calendar")
                 }
+                VStack(alignment: .leading, spacing: 12) {
+                    Text("日ごとの学習時間").font(.headline)
+                    if s.totalMinutes == 0 {
+                        InlineEmptyState(
+                            title: "まだ記録がありません",
+                            message: "今日画面の「取り組む」からタイマーを使うと、ここに記録されます。",
+                            systemImage: "chart.bar"
+                        )
+                    } else {
+                        Chart(s.days) { d in
+                            BarMark(x: .value("日付", d.label), y: .value("分", d.minutes))
+                                .foregroundStyle(Theme.accent)
+                                .accessibilityLabel(d.label)
+                                .accessibilityValue(formatMinutes(d.minutes))
+                        }
+                        .chartYAxis { AxisMarks(position: .leading) }
+                        .frame(height: 200)
+                        Text("1日平均 \(formatMinutes(s.totalMinutes / 7))")
+                            .font(.subheadline)
+                            .foregroundStyle(.secondary)
+                    }
+                }
+                .padding(16)
+                .background(Theme.secondaryBackground, in: RoundedRectangle(cornerRadius: Theme.cardCorner, style: .continuous))
             }
+            .padding(16)
         }
     }
 
     private func load() async {
-        isLoading = true; defer { isLoading = false }
-        errorMessage = nil
+        isLoading = true
+        defer { isLoading = false }
         do {
-            let sessions = try await SessionsRepository(api: auth.api).sessions(days: 7)
-            stats = aggregate(sessions: sessions)
-            totalMinutes = stats.reduce(0) { $0 + $1.minutes }
-        } catch let e as APIError {
-            errorMessage = e.errorDescription
+            stats = try await StudyStats.load(api: auth.api)
         } catch {
-            errorMessage = "読み込みに失敗しました"
+            if stats != nil, (error as? APIError)?.isCancelled != true {
+                errorMessage = "最新の記録を読み込めませんでした。"
+            }
         }
     }
+}
 
-    private func aggregate(sessions: [StudySession]) -> [DailyStat] {
-        let cal = JSTDate.calendar
+/// 直近 7 日の学習時間集計。日付の区切りは JST。
+struct StudyStats {
+    struct Day: Identifiable {
+        let id: String
+        let label: String
+        let minutes: Int
+    }
+
+    let days: [Day]
+    var totalMinutes: Int { days.reduce(0) { $0 + $1.minutes } }
+    var todayMinutes: Int { days.last?.minutes ?? 0 }
+
+    static func load(api: APIClient) async throws -> StudyStats {
+        // サーバは「今から N×24 時間」で区切るため、最も古い日が欠けないよう 1 日多く取る。
+        let sessions = try await SessionsRepository(api: api).sessions(days: 8)
+        return StudyStats(sessions: sessions)
+    }
+
+    init(sessions: [StudySession]) {
         var byDay: [String: Int] = [:]
         for s in sessions {
             guard let startedAt = JSTDate.parseTimestamp(s.startedAt) else { continue }
-            let day = JSTDate.iso.string(from: startedAt)
-            byDay[day, default: 0] += (s.durationSeconds / 60)
+            byDay[JSTDate.iso.string(from: startedAt), default: 0] += s.durationSeconds / 60
         }
-        let today = cal.startOfDay(for: Date())
-        return (0..<7).reversed().map { offset in
-            let d = cal.date(byAdding: .day, value: -offset, to: today) ?? today
-            let ymd = JSTDate.iso.string(from: d)
-            let minutes = byDay[ymd] ?? 0
-            let label = JSTDate.displayShort.string(from: d)
-            return DailyStat(id: ymd, date: d, minutes: minutes, label: label)
+        days = (0..<7).reversed().map { offset in
+            let ymd = JSTDate.todayString(offsetDays: -offset)
+            let label = JSTDate.date(from: ymd).map { JSTDate.displayShort.string(from: $0) } ?? ymd
+            return Day(id: ymd, label: label, minutes: byDay[ymd] ?? 0)
         }
     }
 }

@@ -9,7 +9,7 @@ struct BusySlotsRepository {
 
     struct CreateBody: Encodable {
         let title: String
-        let kind: String        // "weekly" or "once"
+        let kind: String        // "weekly" or "date"
         let weekday: Int?
         let specific_date: String?
         let time_of_day: String

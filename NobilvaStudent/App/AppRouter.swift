@@ -1,25 +1,26 @@
 import Foundation
 import SwiftUI
 
-/// タブ横断のちょっとした指示 (「タイマータブに切り替えてこの PlanItem を選ぶ」等) を
-/// 運ぶための軽量ルーター。View 側は @EnvironmentObject で購読。
+/// タブ横断の画面遷移 (タイマー / 相談シートを開く等) をまとめる軽量ルーター。
+/// シートは MainTabView の 1 箇所だけで表示し、各画面は router を呼ぶだけにする。
 @MainActor
 final class AppRouter: ObservableObject {
-    @Published var selectedTab: MainTabView.Tab = .home
-    /// Timer 画面が起動時に読み取る「これで走らせろ」指示。
-    @Published var timerPreselectedPlanItemId: String?
-    /// Timer 画面を Sheet で開くフラグ (タブ廃止に伴い、Dashboard/Plan の "取り組む" から呼ぶ)。
+    @Published var selectedTab: MainTabView.Tab = .today
     @Published var timerPresented: Bool = false
+    @Published var consulting: ConsultRequest?
 
-    func startTimer(with planItemId: String) {
-        timerPreselectedPlanItemId = planItemId
+    struct ConsultRequest: Identifiable {
+        let id = UUID()
+        let card: ChatTaskCard
+    }
+
+    /// 「取り組む」。計測中なら対象は変えずにタイマーを開くだけ。
+    func startTimer(for item: StudyItem?, timer: StudyTimer) {
+        if !timer.hasSession { timer.select(item) }
         timerPresented = true
     }
 
-    /// PlanItem に紐付かない「取り組む」用。未日付タスクからのショートカット。
-    /// Timer sheet が開いた後、ユーザが必要なら手動で今日の item を選択する。
-    func openTimer() {
-        timerPreselectedPlanItemId = nil
-        timerPresented = true
+    func consult(_ item: StudyItem) {
+        consulting = ConsultRequest(card: item.consultCard)
     }
 }

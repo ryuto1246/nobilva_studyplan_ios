@@ -20,7 +20,7 @@ struct TasksRepository {
         try await api.get("/api/v1/student/tasks/overdue")
     }
 
-    struct TaskBody: Encodable {
+    struct TaskBody: Encodable, Equatable {
         var title: String
         var subject: String?
         var dueDate: String?
@@ -35,8 +35,9 @@ struct TasksRepository {
         var recurrenceWeekday: Int?
     }
 
+    /// サーバの createTask は `{ taskId }` を返す。
     struct CreateResponse: Codable {
-        let id: String
+        let taskId: String?
     }
 
     func create(_ body: TaskBody) async throws -> CreateResponse {
