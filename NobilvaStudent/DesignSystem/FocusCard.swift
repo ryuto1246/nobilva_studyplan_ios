@@ -25,17 +25,11 @@ struct FocusCard: View {
                 }
             }
 
+            // 相談は主操作ではないので、同じ列の右端に小さなアイコンボタンとして置く。
             ViewThatFits(in: .horizontal) {
-                HStack(spacing: 12) { buttons }
-                VStack(spacing: 12) { buttons }
+                HStack(spacing: 10) { buttons; consultButton }
+                VStack(spacing: 10) { buttons; consultButton }
             }
-
-            Button(action: onConsult) {
-                Label("先生に相談する", systemImage: "bubble.left")
-                    .font(.subheadline)
-                    .frame(minHeight: 44)
-            }
-            .buttonStyle(.borderless)
         }
         .padding(20)
         .frame(maxWidth: .infinity, alignment: .leading)
@@ -44,6 +38,17 @@ struct FocusCard: View {
             RoundedRectangle(cornerRadius: 20, style: .continuous)
                 .strokeBorder(Theme.accent.opacity(0.35), lineWidth: 1)
         )
+    }
+
+    private var consultButton: some View {
+        Button(action: onConsult) {
+            Image(systemName: "bubble.left")
+                .font(.body.weight(.semibold))
+                .frame(minWidth: 34, minHeight: 34)
+        }
+        .buttonStyle(.bordered)
+        .tint(.secondary)
+        .accessibilityLabel("先生に相談する")
     }
 
     @ViewBuilder
