@@ -161,7 +161,7 @@ struct TodayView: View {
                 SectionHeader("明日の予定") {
                     if let d = vm.tomorrowDate { Text(JSTDate.monthDay(d)).foregroundStyle(.secondary) }
                 }
-                StudyItemList(items: vm.tomorrowPreview) { item in
+                StudyItemList(items: vm.tomorrowPreview, dividerInset: 12) { item in
                     StudyItemRow(item: item)
                 }
             }
@@ -310,9 +310,10 @@ struct TodayView: View {
                 Image(systemName: "chevron.right").foregroundStyle(.tertiary)
             }
             .font(.body)
-            .padding(16)
+            .foregroundStyle(Theme.accent)
+            .padding(.horizontal, 4)
             .frame(minHeight: 44)
-            .background(Theme.secondaryBackground, in: RoundedRectangle(cornerRadius: Theme.cardCorner, style: .continuous))
+            .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
     }

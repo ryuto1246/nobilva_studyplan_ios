@@ -26,7 +26,7 @@ struct RetryStateView: View {
     }
 }
 
-/// Card 内に置く小さめの空状態。
+/// 一覧の代わりに置く小さめの空状態 (枠で囲まない)。
 struct InlineEmptyState: View {
     let title: String
     var message: String? = nil
@@ -48,8 +48,6 @@ struct InlineEmptyState: View {
         .frame(maxWidth: .infinity)
         .padding(.vertical, 24)
         .padding(.horizontal, 16)
-        .background(Theme.secondaryBackground)
-        .clipShape(RoundedRectangle(cornerRadius: Theme.cardCorner, style: .continuous))
     }
 }
 

@@ -156,19 +156,41 @@ struct CompletionToggle: View {
 
 /// 行を Card 内で区切り線付きで並べる。
 struct StudyItemList<Row: View>: View {
+    enum Style { case grouped, plain }
+
     let items: [StudyItem]
+    var style: Style = .grouped
     @ViewBuilder let row: (StudyItem) -> Row
 
+    /// 区切り線の左の余白。行に完了の丸が無いときは 12 を渡す。
+    var dividerInset: CGFloat = 56
+
+    init(items: [StudyItem], style: Style = .grouped, dividerInset: CGFloat = 56,
+         @ViewBuilder row: @escaping (StudyItem) -> Row) {
+        self.items = items
+        self.style = style
+        self.dividerInset = dividerInset
+        self.row = row
+    }
+
     var body: some View {
-        VStack(spacing: 0) {
+        let list = VStack(spacing: 0) {
             ForEach(Array(items.enumerated()), id: \.element.id) { i, item in
                 row(item)
                 if i != items.count - 1 {
-                    Divider().padding(.leading, 56)
+                    // 完了の丸がある行は文字の頭 (56pt) から、無い行は行の頭から線を引く。
+                    Divider().padding(.leading, dividerInset)
                 }
             }
         }
-        .background(Theme.secondaryBackground)
-        .clipShape(RoundedRectangle(cornerRadius: Theme.cardCorner, style: .continuous))
+        // grouped: 灰色の背景の上で、まとまりを白い角丸で囲む。
+        // plain: 白い背景の画面で、区切り線だけで並べる (計画一覧など、一覧そのものが主役の画面)。
+        if style == .grouped {
+            list
+                .background(Theme.secondaryBackground)
+                .clipShape(RoundedRectangle(cornerRadius: Theme.cardCorner, style: .continuous))
+        } else {
+            list
+        }
     }
 }

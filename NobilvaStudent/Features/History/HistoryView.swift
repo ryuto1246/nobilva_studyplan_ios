@@ -1,5 +1,6 @@
 import SwiftUI
 import Charts
+import UIKit
 
 /// 学習記録 (マイページから push)。直近 7 日の学習時間を日ごとに見せる。
 struct HistoryView: View {
@@ -19,47 +20,72 @@ struct HistoryView: View {
                 ScrollView { RetryStateView { await load() }.padding(.top, 80) }
             }
         }
-        .background(Theme.groupedBackground.ignoresSafeArea())
+        .background(Color(UIColor.systemBackground).ignoresSafeArea())
         .navigationTitle("学習記録")
         .navigationBarTitleDisplayMode(.inline)
         .task { await load() }
         .refreshable { await load() }
     }
 
+    /// 要約 (数字) → グラフ → 日ごとの一覧。どれも枠で囲まず、白い画面に順に置く。
     private func content(_ s: StudyStats) -> some View {
         ScrollView {
-            VStack(alignment: .leading, spacing: 16) {
-                HStack(spacing: 12) {
-                    StatCard(label: "今日", value: formatMinutes(s.todayMinutes), systemImage: "sun.max")
-                    StatCard(label: "直近7日", value: formatMinutes(s.totalMinutes), systemImage: "calendar")
+            VStack(alignment: .leading, spacing: 24) {
+                HStack(alignment: .top, spacing: 0) {
+                    stat("今日", formatMinutes(s.todayMinutes))
+                    Divider().frame(height: 44)
+                    stat("直近7日", formatMinutes(s.totalMinutes))
+                    Divider().frame(height: 44)
+                    stat("1日平均", formatMinutes(s.totalMinutes / 7))
                 }
-                VStack(alignment: .leading, spacing: 12) {
-                    SectionHeader("日ごとの学習時間")
-                    if s.totalMinutes == 0 {
-                        InlineEmptyState(
-                            title: "まだ記録がありません",
-                            message: "今日画面の「取り組む」からタイマーを使うと、ここに記録されます。",
-                            systemImage: "chart.bar"
-                        )
-                    } else {
-                        Chart(s.days) { d in
-                            BarMark(x: .value("日付", d.label), y: .value("分", d.minutes))
-                                .foregroundStyle(Theme.accent)
-                                .accessibilityLabel(d.label)
-                                .accessibilityValue(formatMinutes(d.minutes))
-                        }
-                        .chartYAxis { AxisMarks(position: .leading) }
-                        .frame(height: 200)
-                        Text("1日平均 \(formatMinutes(s.totalMinutes / 7))")
-                            .font(.subheadline)
+                if s.totalMinutes == 0 {
+                    InlineEmptyState(
+                        title: "まだ記録がありません",
+                        message: "今日画面の「取り組む」からタイマーを使うと、ここに記録されます。",
+                        systemImage: "chart.bar"
+                    )
+                } else {
+                    Chart(s.days) { d in
+                        BarMark(x: .value("日付", d.weekday), y: .value("分", d.minutes))
+                            .foregroundStyle(Theme.accent)
+                            .cornerRadius(4)
+                            .accessibilityLabel(d.label)
+                            .accessibilityValue(formatMinutes(d.minutes))
+                    }
+                    .chartYAxis { AxisMarks(position: .leading) }
+                    .frame(height: 200)
+
+                    VStack(alignment: .leading, spacing: 0) {
+                        Text("日ごと")
+                            .font(.subheadline.weight(.semibold))
                             .foregroundStyle(.secondary)
+                            .padding(.bottom, 4)
+                        ForEach(s.days.reversed()) { d in
+                            HStack {
+                                Text(d.label)
+                                Spacer()
+                                Text(d.minutes == 0 ? "—" : formatMinutes(d.minutes))
+                                    .foregroundStyle(d.minutes == 0 ? .tertiary : .primary)
+                                    .monospacedDigit()
+                            }
+                            .font(.body)
+                            .frame(minHeight: 44)
+                            Divider()
+                        }
                     }
                 }
-                .padding(16)
-                .background(Theme.secondaryBackground, in: RoundedRectangle(cornerRadius: Theme.cardCorner, style: .continuous))
             }
             .padding(16)
         }
+    }
+
+    private func stat(_ label: String, _ value: String) -> some View {
+        VStack(spacing: 4) {
+            Text(label).font(.caption).foregroundStyle(.secondary)
+            Text(value).font(.title3.bold().monospacedDigit()).foregroundStyle(Theme.accent)
+        }
+        .frame(maxWidth: .infinity)
+        .accessibilityElement(children: .combine)
     }
 
     private func load() async {
@@ -80,6 +106,8 @@ struct StudyStats {
     struct Day: Identifiable {
         let id: String
         let label: String
+        /// グラフの横軸用 ("水")。7 本並べても詰まらないよう曜日だけにする。
+        let weekday: String
         let minutes: Int
     }
 
@@ -101,10 +129,21 @@ struct StudyStats {
         }
         days = (0..<7).reversed().map { offset in
             let ymd = JSTDate.todayString(offsetDays: -offset)
-            let label = JSTDate.date(from: ymd).map { JSTDate.displayShort.string(from: $0) } ?? ymd
-            return Day(id: ymd, label: label, minutes: byDay[ymd] ?? 0)
+            let date = JSTDate.date(from: ymd)
+            let label = date.map { JSTDate.displayShort.string(from: $0) } ?? ymd
+            let weekday = offset == 0 ? "今日" : (date.map { JSTDate.calendar.weekdaySymbols.isEmpty ? "" : Self.weekdayFormatter.string(from: $0) } ?? "")
+            return Day(id: ymd, label: label, weekday: weekday, minutes: byDay[ymd] ?? 0)
         }
     }
+}
+
+extension StudyStats {
+    fileprivate static let weekdayFormatter: DateFormatter = {
+        let f = DateFormatter()
+        f.calendar = JSTDate.calendar; f.timeZone = JSTDate.timeZone
+        f.locale = Locale(identifier: "ja_JP"); f.dateFormat = "E"
+        return f
+    }()
 }
 
 struct SessionsRepository {

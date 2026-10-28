@@ -145,9 +145,9 @@ struct MeetingDetailView: View {
             }
             .font(.subheadline)
         }
-        .padding(16)
+        .padding(.horizontal, 4)
+        .padding(.bottom, 4)
         .frame(maxWidth: .infinity, alignment: .leading)
-        .background(Theme.secondaryBackground, in: RoundedRectangle(cornerRadius: Theme.cardCorner, style: .continuous))
     }
 
     private func infoBox(title: String, body: String) -> some View {
