@@ -18,7 +18,7 @@ struct StudyItemRow: View {
     var onEdit: (() -> Void)?
 
     var body: some View {
-        HStack(alignment: .top, spacing: 4) {
+        HStack(alignment: .center, spacing: 4) {
             if let onToggle {
                 CompletionToggle(isDone: item.isDone, title: item.title, action: onToggle)
             }
