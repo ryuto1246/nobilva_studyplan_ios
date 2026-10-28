@@ -173,7 +173,7 @@ struct TodayView: View {
         if !vm.nextUp.isEmpty {
             VStack(alignment: .leading, spacing: 10) {
                 SectionHeader("次にやること")
-                StudyItemList(items: vm.nextUp) { item in
+                StudyItemList(items: vm.nextUp, style: .plain) { item in
                     StudyItemRow(
                         item: item,
                         onToggle: { toggle(item) },
@@ -304,17 +304,13 @@ struct TodayView: View {
         NavigationLink {
             PlanListView()
         } label: {
-            HStack {
-                Label("これからの計画をすべて見る", systemImage: "calendar")
-                Spacer()
-                Image(systemName: "chevron.right").foregroundStyle(.tertiary)
-            }
-            .font(.body)
-            .foregroundStyle(Theme.accent)
-            .padding(.horizontal, 4)
-            .frame(minHeight: 44)
-            .contentShape(Rectangle())
+            Label("これからの計画をすべて見る", systemImage: "calendar")
+                .font(.body.weight(.semibold))
+                .frame(maxWidth: .infinity, minHeight: 34)
+                .foregroundStyle(Color.primary)
         }
-        .buttonStyle(.plain)
+        // 画面の主操作 (取り組む・面談に参加) と色を競わないよう、灰色の控えめなボタンにする。
+        .buttonStyle(.bordered)
+        .tint(.secondary)
     }
 }
