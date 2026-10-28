@@ -3,9 +3,13 @@ import SwiftUI
 struct RootView: View {
     @EnvironmentObject var auth: AuthStore
     @EnvironmentObject var deepLink: DeepLinkRouter
+    @EnvironmentObject var toast: ToastCenter
+    @EnvironmentObject var timer: StudyTimer
 
     var body: some View {
         content
+            // タブバー (約 64pt) と、計測中はその上の計測バー (約 58pt) を避ける。
+            .toastHost(toast, bottomInset: 72 + (timer.hasSession ? 58 : 0))
             // Recovery は authenticated / unauthenticated どちらの状態でも fullScreen で被せる。
             // token 消費で phase が .authenticated に切り替わり、成功画面で dismiss → MainTabView へ。
             .fullScreenCover(isPresented: recoveryBinding) {

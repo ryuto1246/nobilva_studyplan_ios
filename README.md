@@ -74,7 +74,6 @@ Signing & Capabilities で以下を行う (初回のみ):
 **未実装 / 後回し**:
 - チャットの WebSocket リアルタイム (現状 15 秒 polling)
 - LINE Login 連携 UI (endpoint は動くが LINE SDK を仕込んでない)
-- パスキー "登録" (mobile API 未実装。Web で登録する導線を Settings に置いてある)
 - ダークモード最適化 (システム標準のマテリアルで自動追従はするが、細部の確認はまだ)
 
 ## Info.plist / Permissions
@@ -92,26 +91,21 @@ Info.plist は `GENERATE_INFOPLIST_FILE = YES` により Xcode が自動生成�
 
 ```
 NobilvaStudent/
-├── App/                   # @main, RootView, MainTabView
-├── Core/                  # JSTDate, Keychain, Log
+├── App/                   # @main, RootView, MainTabView, AppRouter
+├── Core/                  # JSTDate, Keychain, Log, PushService, DiskCache
 ├── Networking/            # APIClient, Envelope, APIError
 ├── Auth/                  # AuthStore, PasskeyClient, SessionModels
-├── Models/                # Codable ドメイン型
-├── DesignSystem/          # Theme, Card, TodoRow, TimerRing, ChatAvatar, GlassBar
+├── Models/                # Codable ドメイン型 + StudyItem (計画とタスクの表示用モデル)
+├── DesignSystem/          # Theme, StudyItemRow, FocusCard, Buttons, StateViews, Toast,
+│                          # MeetingRow, TimerRing, TimerAccessoryBar, ChatAvatar
 ├── Features/
-│   ├── Login/
-│   ├── Dashboard/
-│   ├── Plan/
-│   ├── Tasks/
-│   ├── Timer/
-│   ├── Goals/
-│   ├── Chat/
-│   ├── Meetings/
-│   ├── History/
-│   ├── BusySlots/
-│   ├── Guide/
-│   ├── Settings/
-│   └── _Stubs.swift       # MoreMenuView など
+│   ├── Today/             # 今日タブ
+│   ├── Chat/              # チャットタブ
+│   ├── MyPage/            # マイページタブ
+│   ├── Plan/  History/  Meetings/  BusySlots/  Settings/  Guide/   # マイページから push
+│   ├── Timer/             # StudyTimer (アプリ全体で 1 つ) と TimerView
+│   ├── Tasks/             # タスクの追加・編集
+│   └── Login/
 └── Preview Content/
 ```
 

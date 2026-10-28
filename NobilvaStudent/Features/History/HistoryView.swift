@@ -4,10 +4,10 @@ import Charts
 /// 学習記録 (マイページから push)。直近 7 日の学習時間を日ごとに見せる。
 struct HistoryView: View {
     @EnvironmentObject var auth: AuthStore
+    @EnvironmentObject var toast: ToastCenter
 
     @State private var stats: StudyStats?
     @State private var isLoading = true
-    @State private var errorMessage: String?
 
     var body: some View {
         Group {
@@ -21,9 +21,9 @@ struct HistoryView: View {
         }
         .background(Theme.groupedBackground.ignoresSafeArea())
         .navigationTitle("学習記録")
+        .navigationBarTitleDisplayMode(.inline)
         .task { await load() }
         .refreshable { await load() }
-        .errorAlert($errorMessage)
     }
 
     private func content(_ s: StudyStats) -> some View {
@@ -34,7 +34,7 @@ struct HistoryView: View {
                     StatCard(label: "直近7日", value: formatMinutes(s.totalMinutes), systemImage: "calendar")
                 }
                 VStack(alignment: .leading, spacing: 12) {
-                    Text("日ごとの学習時間").font(.headline)
+                    SectionHeader("日ごとの学習時間")
                     if s.totalMinutes == 0 {
                         InlineEmptyState(
                             title: "まだ記録がありません",
@@ -69,7 +69,7 @@ struct HistoryView: View {
             stats = try await StudyStats.load(api: auth.api)
         } catch {
             if stats != nil, (error as? APIError)?.isCancelled != true {
-                errorMessage = "最新の記録を読み込めませんでした。"
+                toast.showError("最新の記録を読み込めませんでした")
             }
         }
     }

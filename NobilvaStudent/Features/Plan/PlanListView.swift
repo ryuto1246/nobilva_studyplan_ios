@@ -7,6 +7,7 @@ struct PlanListView: View {
     @EnvironmentObject var auth: AuthStore
     @EnvironmentObject var router: AppRouter
     @EnvironmentObject var timer: StudyTimer
+    @EnvironmentObject var toast: ToastCenter
 
     @State private var days: [PlanForDate] = []
     @State private var isLoading = true
@@ -32,6 +33,7 @@ struct PlanListView: View {
         }
         .background(Theme.groupedBackground.ignoresSafeArea())
         .navigationTitle("計画")
+        .navigationBarTitleDisplayMode(.inline)
         .task {
             if days.isEmpty, let cached = PlanRepository.cachedPeriods() { days = flatten(cached) }
             await load()
@@ -51,18 +53,10 @@ struct PlanListView: View {
                 }
                 ForEach(upcoming, id: \.plan?.id) { day in daySection(day) }
                 if !past.isEmpty {
-                    DisclosureGroup(isExpanded: $showPast) {
-                        LazyVStack(alignment: .leading, spacing: 24) {
-                            ForEach(past, id: \.plan?.id) { day in daySection(day) }
-                        }
-                        .padding(.top, 12)
-                    } label: {
-                        Text("過去の計画 (\(past.count)日)")
-                            .font(.subheadline.weight(.semibold))
-                            .foregroundStyle(.secondary)
+                    CollapsibleHeader(title: "過去の計画 (\(past.count)日)", isExpanded: $showPast)
+                    if showPast {
+                        ForEach(past, id: \.plan?.id) { day in daySection(day) }
                     }
-                    .tint(.secondary)
-                    .padding(.horizontal, 4)
                 }
             }
             .padding(.horizontal, 16)
@@ -129,19 +123,27 @@ struct PlanListView: View {
         } catch {
             loadFailed = true
             if !days.isEmpty, (error as? APIError)?.isCancelled != true {
-                errorMessage = "最新の計画を読み込めませんでした。"
+                toast.showError("最新の計画を読み込めませんでした")
             }
         }
     }
 
     private func toggle(_ item: StudyItem) async {
         let next = !item.isDone
+        let previous = overrides[item.id]
         overrides[item.id] = next
         do {
             try await TodayRepository(api: auth.api).setDone(item, done: next)
             NotificationCenter.default.post(name: .studyDataDidChange, object: nil)
+            if next {
+                toast.show("「\(item.title)」を完了しました", actionTitle: "元に戻す") {
+                    Task { await toggle(item.withDone(true)) }
+                }
+            } else {
+                toast.show("未完了に戻しました", systemImage: "arrow.uturn.backward.circle.fill", tint: .secondary)
+            }
         } catch {
-            overrides[item.id] = nil
+            if overrides[item.id] == next { overrides[item.id] = previous }
             errorMessage = "更新できませんでした。通信状況を確認してください。"
         }
     }

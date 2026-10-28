@@ -67,6 +67,9 @@ struct MyPageView: View {
 
                 Section {
                     Button("ログアウト", role: .destructive) { showLogoutConfirm = true }
+                        .confirmationDialog("ログアウトしますか？", isPresented: $showLogoutConfirm, titleVisibility: .visible) {
+                            Button("ログアウト", role: .destructive) { Task { await auth.logout() } }
+                        }
                     NavigationLink { DeleteAccountView() } label: {
                         Text("アカウントを削除").foregroundStyle(.red)
                     }
@@ -81,11 +84,9 @@ struct MyPageView: View {
             .onReceive(NotificationCenter.default.publisher(for: .studyDataDidChange)) { _ in
                 Task { stats = try? await StudyStats.load(api: auth.api) }
             }
-            .confirmationDialog("ログアウトしますか？", isPresented: $showLogoutConfirm, titleVisibility: .visible) {
-                Button("ログアウト", role: .destructive) { Task { await auth.logout() } }
-            }
-            .timerAccessory()
         }
+        // push 先の画面でも計測バーを出すため、NavigationStack の外側に付ける。
+        .timerAccessory()
     }
 }
 

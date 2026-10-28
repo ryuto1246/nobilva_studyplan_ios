@@ -1,10 +1,12 @@
 import SwiftUI
+import UIKit
 
 /// タイマーのシート。計測状態は StudyTimer (アプリ全体で 1 つ) が持つので、
 /// シートを閉じても計測は続き、タブバー上の計測バーから戻ってこられる。
 struct TimerView: View {
     @EnvironmentObject var auth: AuthStore
     @EnvironmentObject var timer: StudyTimer
+    @EnvironmentObject var toast: ToastCenter
     @Environment(\.dismiss) var dismiss
 
     @State private var todayItems: [StudyItem] = []
@@ -39,23 +41,19 @@ struct TimerView: View {
                 }
             }
             .task { await loadPrefs(); await loadTodayItems() }
-            .alert("記録しました", isPresented: Binding(
-                get: { timer.recordedMinutes != nil },
-                set: { if !$0 { timer.recordedMinutes = nil } }
-            )) {
-                Button("OK") { timer.recordedMinutes = nil; dismiss() }
-            } message: {
-                Text("\(timer.recordedMinutes ?? 0)分の学習を記録しました。お疲れさまでした。")
-            }
+            // 計測中にこの画面を開いている間だけ、画面を自動で消さない。
+            .onAppear { UIApplication.shared.isIdleTimerDisabled = timer.isRunning }
+            .onChange(of: timer.isRunning) { _, running in UIApplication.shared.isIdleTimerDisabled = running }
+            .onDisappear { UIApplication.shared.isIdleTimerDisabled = false }
             .errorAlert($timer.errorMessage)
-            .confirmationDialog("記録せずに終了しますか？", isPresented: $showDiscardConfirm, titleVisibility: .visible) {
-                Button("記録せずに終了", role: .destructive) { timer.discard() }
-            } message: {
-                Text("ここまでの \(timer.studyMinutes)分は記録されません。")
-            }
+            // シートの上でもトーストが見えるように (アプリのルートの表示はシートの下に隠れる)。
+            .toastHost(toast, bottomInset: 24)
             .sheet(isPresented: $showManualSheet) {
-                ManualRecordSheet(todayItems: todayItems, initialPlanItemId: timer.snapshot.item?.planItemId)
-                    .environmentObject(auth)
+                ManualRecordSheet(todayItems: todayItems, initialPlanItemId: timer.snapshot.item?.planItemId) { minutes in
+                    toast.show("\(formatMinutes(minutes))の学習を記録しました")
+                    dismiss()
+                }
+                .environmentObject(auth)
             }
         }
     }
@@ -76,7 +74,7 @@ struct TimerView: View {
             }
         } else {
             Menu {
-                Button("選ばずに始める") { timer.select(nil) }
+                Button("自由学習 (選ばない)") { timer.select(nil) }
                 if !todayItems.isEmpty {
                     Section("今日の計画") {
                         ForEach(todayItems) { item in
@@ -88,7 +86,7 @@ struct TimerView: View {
                 HStack(spacing: 8) {
                     VStack(alignment: .leading, spacing: 2) {
                         Text("取り組むこと").font(.caption).foregroundStyle(.secondary)
-                        Text(timer.snapshot.item?.title ?? "選ばずに始める")
+                        Text(timer.snapshot.item?.title ?? "自由学習 (選ばない)")
                             .font(.body.weight(.semibold))
                             .foregroundStyle(.primary)
                             .multilineTextAlignment(.leading)
@@ -106,7 +104,7 @@ struct TimerView: View {
             }
             // Menu のラベルはアクセント色に塗られるので、通常の文字色に戻す。
             .tint(.primary)
-            .accessibilityLabel("取り組むこと: \(timer.snapshot.item?.title ?? "選ばずに始める")")
+            .accessibilityLabel("取り組むこと: \(timer.snapshot.item?.title ?? "自由学習")")
         }
     }
 
@@ -165,8 +163,10 @@ struct TimerView: View {
                 HStack(spacing: 12) {
                     if timer.isRunning {
                         SecondaryButton("一時停止", systemImage: "pause.fill") { timer.pause() }
+                            .disabled(timer.isCompleting)
                     } else if !timer.reading.finished {
                         SecondaryButton("再開", systemImage: "play.fill") { timer.resume() }
+                            .disabled(timer.isCompleting)
                     }
                     PrimaryButton("記録する", systemImage: "checkmark", isLoading: timer.isCompleting) {
                         Task { await timer.complete() }
@@ -176,6 +176,15 @@ struct TimerView: View {
                     .font(.subheadline)
                     .frame(minHeight: 44)
                     .disabled(timer.isCompleting)
+                    .confirmationDialog("記録せずに終了しますか？", isPresented: $showDiscardConfirm, titleVisibility: .visible) {
+                        Button("記録せずに終了", role: .destructive) {
+                            timer.discard()
+                            toast.show("計測を終了しました", systemImage: "stop.circle.fill", tint: .secondary)
+                        }
+                    } message: {
+                        Text("ここまでの\(StudyTimer.RecordEvent(seconds: Int(timer.reading.studySeconds)).label)は記録されません。")
+                    }
+
             }
         }
     }
@@ -207,14 +216,16 @@ private struct ManualRecordSheet: View {
     @EnvironmentObject var auth: AuthStore
     @Environment(\.dismiss) var dismiss
     let todayItems: [StudyItem]
+    let onRecorded: (Int) -> Void
 
     @State private var minutes: Int = 30
     @State private var planItemId: String?
     @State private var isSaving = false
     @State private var errorMessage: String?
 
-    init(todayItems: [StudyItem], initialPlanItemId: String?) {
+    init(todayItems: [StudyItem], initialPlanItemId: String?, onRecorded: @escaping (Int) -> Void) {
         self.todayItems = todayItems
+        self.onRecorded = onRecorded
         _planItemId = State(initialValue: initialPlanItemId)
     }
 
@@ -257,6 +268,7 @@ private struct ManualRecordSheet: View {
             _ = try await TimerRepository(api: auth.api).manual(planItemId: planItemId, durationMinutes: minutes)
             NotificationCenter.default.post(name: .studyDataDidChange, object: nil)
             dismiss()
+            onRecorded(minutes)
         } catch {
             errorMessage = (error as? APIError)?.errorDescription ?? "記録できませんでした"
         }

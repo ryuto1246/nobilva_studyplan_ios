@@ -8,6 +8,7 @@ struct MainTabView: View {
     @EnvironmentObject var chatUnread: ChatUnreadStore
     @EnvironmentObject var router: AppRouter
     @EnvironmentObject var timer: StudyTimer
+    @EnvironmentObject var toast: ToastCenter
 
     enum Tab: Hashable {
         case today, chat, myPage
@@ -36,13 +37,24 @@ struct MainTabView: View {
             timer.attach(api: auth.api)
         }
         .onDisappear { chatUnread.stop() }
+        // タイマーで記録できたら、シートを閉じてトーストで知らせる (アラートで止めない)。
+        .onChange(of: timer.lastRecord) { _, record in
+            guard let record else { return }
+            router.timerPresented = false
+            // シートが閉じきってから出す (閉じるアニメーションの下に隠れないように)。
+            Task {
+                try? await Task.sleep(nanoseconds: 450_000_000)
+                toast.show("\(record.label)の学習を記録しました")
+            }
+        }
         .sheet(isPresented: $router.timerPresented) {
             TimerView()
                 .environmentObject(auth)
                 .environmentObject(timer)
+                .environmentObject(toast)
         }
         .sheet(item: $router.consulting) { req in
-            TaskChatSheet(card: req.card)
+            TaskChatSheet(card: req.card, onSuccess: { toast.show("先生に相談を送りました") })
                 .environmentObject(auth)
         }
     }

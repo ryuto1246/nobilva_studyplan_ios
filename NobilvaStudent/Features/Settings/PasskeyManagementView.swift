@@ -12,7 +12,7 @@ struct PasskeyManagementView: View {
     var body: some View {
         List {
             Section {
-                Text("パスキーを登録すると、次回から Face ID ですぐにログインできます。この端末で 1 回登録すれば、同じ Apple ID の他のデバイス (iPad / Mac Safari 等) でも使えます。")
+                Text("パスキーを登録すると、次回から Face ID や Touch ID ですぐにログインできます。この端末で 1 回登録すれば、同じ Apple ID の他のデバイス (iPad / Mac Safari 等) でも使えます。")
                     .font(.footnote)
                     .foregroundStyle(.secondary)
             }
@@ -40,6 +40,7 @@ struct PasskeyManagementView: View {
             }
         }
         .navigationTitle("パスキー")
+        .navigationBarTitleDisplayMode(.inline)
         .errorAlert($errorMessage)
     }
 

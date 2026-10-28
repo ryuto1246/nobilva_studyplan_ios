@@ -64,3 +64,18 @@ struct StudentUserInfo: Codable {
     let student: StudentProfile?
     let email: String?
 }
+
+extension StudentProfile {
+    func with(grade: GradeLevel? = nil, dailyMinutes: Int? = nil,
+              work: Int? = nil, shortBreak: Int? = nil, longBreak: Int? = nil) -> StudentProfile {
+        StudentProfile(
+            id: id, userId: userId,
+            gradeLevel: grade ?? gradeLevel,
+            dailyAvailableMinutes: dailyMinutes ?? dailyAvailableMinutes,
+            pomodoroWorkMinutes: work ?? pomodoroWorkMinutes,
+            pomodoroBreakMinutes: shortBreak ?? pomodoroBreakMinutes,
+            pomodoroLongBreakMinutes: longBreak ?? pomodoroLongBreakMinutes,
+            inviteCode: inviteCode, aiPlanEnabled: aiPlanEnabled, tags: tags
+        )
+    }
+}

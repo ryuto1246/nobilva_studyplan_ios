@@ -84,8 +84,14 @@ final class StudyTimer: ObservableObject {
     @Published private(set) var isStarting = false
     @Published private(set) var isCompleting = false
     @Published var errorMessage: String?
-    /// 記録に成功した分数。View がアラート表示に使い、閉じたら nil に戻す。
-    @Published var recordedMinutes: Int?
+    /// 記録に成功したときのイベント。MainTabView がトーストを出してシートを閉じる。
+    struct RecordEvent: Equatable {
+        let id = UUID()
+        let seconds: Int
+        var label: String { seconds < 60 ? "\(seconds)秒" : formatMinutes(seconds / 60) }
+    }
+    @Published private(set) var lastRecord: RecordEvent?
+    private var startTask: Task<String?, Never>?
 
     private var api: APIClient?
     private var tickTask: Task<Void, Never>?
@@ -178,22 +184,28 @@ final class StudyTimer: ObservableObject {
         startTick()
         scheduleNotifications()
         UIImpactFeedbackGenerator(style: .medium).impactOccurred()
-        let sessionId = try? await createServerSession()
-        // 応答待ちの間に破棄・完了されていたら、別の計測に紐付けない。
+        // 応答を待つ間に「記録する」「破棄」が押されてもよいよう、Task を保持して共有する。
+        let task = Task { try? await self.createServerSession() }
+        startTask = task
+        let sessionId = await task.value
+        if startTask == task { startTask = nil }
         if snapshot.startedAt == startedAt, snapshot.sessionId == nil {
             snapshot.sessionId = sessionId
+        } else if let sessionId, let api {
+            // 応答待ちの間に破棄・完了されていた: 作られてしまったセッションは消す。
+            Task { try? await TimerRepository(api: api).cancel(sessionId: sessionId) }
         }
     }
 
     func pause() {
-        guard isRunning else { return }
+        guard isRunning, !isCompleting else { return }
         freezeBaseline()
         stopTick()
         cancelNotifications()
     }
 
     func resume() {
-        guard isPaused, !reading.finished else { return }
+        guard isPaused, !isCompleting, !reading.finished else { return }
         snapshot.resumedAt = Date()
         now = Date()
         startTick()
@@ -210,6 +222,10 @@ final class StudyTimer: ObservableObject {
         cancelNotifications()
         let seconds = Int(snapshot.studySeconds)
         do {
+            // 開始 API の応答待ちなら、それを待って同じセッションに記録する。
+            if snapshot.sessionId == nil, let pending = startTask {
+                snapshot.sessionId = await pending.value
+            }
             let sessionId: String
             if let existing = snapshot.sessionId {
                 sessionId = existing
@@ -220,7 +236,7 @@ final class StudyTimer: ObservableObject {
             guard let api else { throw APIError.notLoggedIn }
             let _: SessionCompletedResponse = try await TimerRepository(api: api)
                 .complete(sessionId: sessionId, durationSeconds: seconds)
-            recordedMinutes = max(1, seconds / 60)
+            lastRecord = RecordEvent(seconds: seconds)
             reset()
             NotificationCenter.default.post(name: .studyDataDidChange, object: nil)
             UINotificationFeedbackGenerator().notificationOccurred(.success)
@@ -231,10 +247,9 @@ final class StudyTimer: ObservableObject {
     }
 
     /// 記録せずに破棄する。開始済みのサーバセッションは取消 API で消す (best-effort)。
+    /// 開始 API の応答待ちだった場合は、start() 側が届いたセッションを消す。
     func discard() {
         let sessionId = snapshot.sessionId
-        stopTick()
-        cancelNotifications()
         reset()
         if let sessionId, let api {
             Task { try? await TimerRepository(api: api).cancel(sessionId: sessionId) }
@@ -313,12 +328,13 @@ final class StudyTimer: ObservableObject {
     }
 
     private func reset() {
+        stopTick()
+        cancelNotifications()
         let s = snapshot
         snapshot = Snapshot(
             mode: s.mode, workMinutes: s.workMinutes, breakMinutes: s.breakMinutes,
             longBreakMinutes: s.longBreakMinutes, countdownMinutes: s.countdownMinutes
         )
-        UIApplication.shared.isIdleTimerDisabled = false
     }
 
     private func createServerSession() async throws -> String {
@@ -330,7 +346,6 @@ final class StudyTimer: ObservableObject {
 
     private func startTick() {
         stopTick()
-        UIApplication.shared.isIdleTimerDisabled = true
         tickTask = Task { [weak self] in
             while !Task.isCancelled {
                 try? await Task.sleep(nanoseconds: 1_000_000_000)
@@ -350,7 +365,6 @@ final class StudyTimer: ObservableObject {
     private func stopTick() {
         tickTask?.cancel()
         tickTask = nil
-        UIApplication.shared.isIdleTimerDisabled = false
     }
 
     private func persist() {

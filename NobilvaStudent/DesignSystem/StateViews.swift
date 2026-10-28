@@ -84,3 +84,31 @@ extension SectionHeader {
         self.trailing = trailing
     }
 }
+
+/// 折りたたみの見出し (「今日完了したもの」「過去の計画」など)。
+/// DisclosureGroup だと矢印の色や位置がそろわないため自前で持つ。
+struct CollapsibleHeader: View {
+    let title: String
+    @Binding var isExpanded: Bool
+
+    var body: some View {
+        Button {
+            withAnimation(.snappy) { isExpanded.toggle() }
+        } label: {
+            HStack {
+                Text(title)
+                    .font(.subheadline.weight(.semibold))
+                Spacer()
+                Image(systemName: "chevron.down")
+                    .font(.footnote.weight(.semibold))
+                    .rotationEffect(.degrees(isExpanded ? 180 : 0))
+            }
+            .foregroundStyle(.secondary)
+            .padding(.horizontal, 4)
+            .frame(minHeight: 44)
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .accessibilityValue(isExpanded ? "開いています" : "閉じています")
+    }
+}

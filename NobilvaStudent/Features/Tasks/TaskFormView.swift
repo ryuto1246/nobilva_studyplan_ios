@@ -5,8 +5,10 @@ struct TaskFormView: View {
     @EnvironmentObject var auth: AuthStore
     @Environment(\.dismiss) var dismiss
 
+    enum Outcome { case added, updated, deleted(id: String) }
+
     let existing: StudentTask?
-    let onSaved: () -> Void
+    let onSaved: (Outcome) -> Void
 
     /// Web の科目色と同じ 5 教科 + その他。
     static let subjects = ["国語", "数学", "英語", "理科", "社会", "その他"]
@@ -24,6 +26,8 @@ struct TaskFormView: View {
     @State private var timeOfDay: TimeOfDay?
     @State private var notes = ""
     @State private var hydrated = false
+    /// 開いた直後のフォーム内容。これと違えば「変更あり」。
+    @State private var initialBody: TasksRepository.TaskBody?
 
     @State private var isSaving = false
     @State private var errorMessage: String?
@@ -32,7 +36,7 @@ struct TaskFormView: View {
     @FocusState private var titleFocused: Bool
 
     private var trimmedTitle: String { title.trimmingCharacters(in: .whitespacesAndNewlines) }
-    private var isDirty: Bool { existing == nil ? !trimmedTitle.isEmpty : hydrated && body0 != originalBody }
+    private var isDirty: Bool { existing == nil ? !trimmedTitle.isEmpty : hydrated && body0 != initialBody }
 
     var body: some View {
         NavigationStack {
@@ -51,9 +55,9 @@ struct TaskFormView: View {
                     }
                 }
                 Section {
-                    Toggle("締切がある", isOn: $hasDueDate.animation())
+                    Toggle("期限がある", isOn: $hasDueDate.animation())
                     if hasDueDate {
-                        DatePicker("締切", selection: $dueDate, displayedComponents: [.date]).jst()
+                        DatePicker("期限", selection: $dueDate, displayedComponents: [.date]).jst()
                     }
                     Toggle("やる日を決める", isOn: $hasScheduledDate.animation())
                     if hasScheduledDate {
@@ -82,6 +86,11 @@ struct TaskFormView: View {
                 if existing != nil {
                     Section {
                         Button("タスクを削除", role: .destructive) { showDeleteConfirm = true }
+                            .confirmationDialog("このタスクを削除しますか？", isPresented: $showDeleteConfirm, titleVisibility: .visible) {
+                                Button("削除", role: .destructive) { Task { await delete() } }
+                            } message: {
+                                Text("元に戻せません。")
+                            }
                     }
                 }
             }
@@ -90,6 +99,9 @@ struct TaskFormView: View {
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) {
                     Button("キャンセル") { isDirty ? (showDiscardConfirm = true) : dismiss() }
+                        .confirmationDialog("変更を破棄しますか？", isPresented: $showDiscardConfirm, titleVisibility: .visible) {
+                            Button("変更を破棄", role: .destructive) { dismiss() }
+                        }
                 }
                 ToolbarItem(placement: .confirmationAction) {
                     if isSaving { ProgressView() } else {
@@ -99,16 +111,9 @@ struct TaskFormView: View {
                 }
             }
             .interactiveDismissDisabled(isDirty || isSaving)
-            .confirmationDialog("変更を破棄しますか？", isPresented: $showDiscardConfirm, titleVisibility: .visible) {
-                Button("変更を破棄", role: .destructive) { dismiss() }
-            }
-            .confirmationDialog("このタスクを削除しますか？", isPresented: $showDeleteConfirm, titleVisibility: .visible) {
-                Button("削除", role: .destructive) { Task { await delete() } }
-            } message: {
-                Text("元に戻せません。")
-            }
             .onAppear {
                 hydrate()
+                if initialBody == nil { initialBody = body0 }
                 if existing == nil { titleFocused = true }
             }
             .errorAlert($errorMessage)
@@ -155,16 +160,6 @@ struct TaskFormView: View {
         )
     }
 
-    private var originalBody: TasksRepository.TaskBody? {
-        guard let e = existing else { return nil }
-        return TasksRepository.TaskBody(
-            title: e.title, subject: e.subject.isEmpty ? "その他" : e.subject, dueDate: e.dueDate,
-            estimatedMinutes: max(5, (e.estimatedMinutes / 5) * 5), unitCount: e.unitCount, unitLabel: e.unitLabel,
-            goalId: e.goalId, recurrence: e.recurrence.rawValue, preferredTimeOfDay: e.preferredTimeOfDay?.rawValue,
-            scheduledDate: e.scheduledDate, notes: e.notes, recurrenceWeekday: e.recurrence == .weekly ? (e.recurrenceWeekday ?? 1) : nil
-        )
-    }
-
     private func save() async {
         isSaving = true
         defer { isSaving = false }
@@ -174,7 +169,7 @@ struct TaskFormView: View {
             } else {
                 _ = try await TasksRepository(api: auth.api).create(body0)
             }
-            onSaved()
+            onSaved(existing == nil ? .added : .updated)
             dismiss()
         } catch {
             errorMessage = (error as? APIError)?.errorDescription ?? "保存できませんでした"
@@ -187,7 +182,7 @@ struct TaskFormView: View {
         defer { isSaving = false }
         do {
             try await TasksRepository(api: auth.api).delete(existing.id)
-            onSaved()
+            onSaved(.deleted(id: existing.id))
             dismiss()
         } catch {
             errorMessage = (error as? APIError)?.errorDescription ?? "削除できませんでした"

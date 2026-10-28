@@ -5,19 +5,23 @@ import UserNotifications
 // マイページ > 設定 の各画面。
 // 共通ルール:
 //  - 読み込みに失敗したら初期値のフォームを出さない (初期値で上書き保存する事故を防ぐ)
-//  - 保存はナビゲーションバー右上。変更が無いときは押せない。成功したら前の画面へ戻る
+//  - iOS の設定アプリと同じく、変更したらその場で保存する (戻るだけで変更が消えないように)
 
-/// 設定フォームの読み込み・保存の枠。各画面は中身のフォームだけを書く。
+/// 設定フォームの読み込み・自動保存の枠。各画面は中身のフォームだけを書く。
 private struct SettingsForm<Content: View>: View {
     let title: String
     let isDirty: Bool
+    /// フォームの現在値。変わったら少し待ってから保存する。
+    let values: AnyHashable
     let load: () async throws -> Void
+    /// 成功したら各画面で「保存済みの値」を更新すること。
     let save: () async throws -> Void
     @ViewBuilder let content: () -> Content
 
-    @Environment(\.dismiss) private var dismiss
     @State private var phase: Phase = .loading
     @State private var isSaving = false
+    @State private var justSaved = false
+    @State private var saveTask: Task<Void, Never>?
     @State private var errorMessage: String?
 
     enum Phase { case loading, loaded, failed }
@@ -33,16 +37,24 @@ private struct SettingsForm<Content: View>: View {
         .navigationTitle(title)
         .navigationBarTitleDisplayMode(.inline)
         .toolbar {
-            ToolbarItem(placement: .confirmationAction) {
+            ToolbarItem(placement: .topBarTrailing) {
                 if isSaving {
                     ProgressView()
-                } else {
-                    Button("保存") { Task { await runSave() } }
-                        .disabled(phase != .loaded || !isDirty)
+                } else if justSaved {
+                    Label("保存しました", systemImage: "checkmark.circle.fill")
+                        .labelStyle(.titleAndIcon)
+                        .font(.subheadline)
+                        .foregroundStyle(.green)
+                        .transition(.opacity)
                 }
             }
         }
         .task { if phase == .loading { await runLoad() } }
+        .onChange(of: values) { _, _ in scheduleSave() }
+        .onDisappear {
+            // 待機中の保存は、画面を離れても取り消さずにすぐ実行する。
+            if saveTask != nil, isDirty { saveTask?.cancel(); Task { await runSave() } }
+        }
         .errorAlert($errorMessage)
     }
 
@@ -51,15 +63,28 @@ private struct SettingsForm<Content: View>: View {
         do { try await load(); phase = .loaded } catch { phase = .failed }
     }
 
+    private func scheduleSave() {
+        guard phase == .loaded, isDirty else { return }
+        saveTask?.cancel()
+        saveTask = Task {
+            try? await Task.sleep(nanoseconds: 600_000_000)
+            guard !Task.isCancelled else { return }
+            await runSave()
+        }
+    }
+
     private func runSave() async {
+        saveTask = nil
         isSaving = true
         defer { isSaving = false }
         do {
             try await save()
-            UINotificationFeedbackGenerator().notificationOccurred(.success)
-            dismiss()
+            UISelectionFeedbackGenerator().selectionChanged()
+            withAnimation { justSaved = true }
+            try? await Task.sleep(nanoseconds: 1_500_000_000)
+            withAnimation { justSaved = false }
         } catch {
-            errorMessage = (error as? APIError)?.errorDescription ?? "保存できませんでした"
+            errorMessage = (error as? APIError)?.errorDescription ?? "保存できませんでした。もう一度変更してください。"
         }
     }
 }
@@ -71,7 +96,7 @@ struct AccountView: View {
     @State private var info: StudentUserInfo?
     @State private var student: StudentProfile?
     @State private var loadFailed = false
-    @State private var copied = false
+    @EnvironmentObject private var toast: ToastCenter
 
     var body: some View {
         Group {
@@ -85,17 +110,16 @@ struct AccountView: View {
                         Section {
                             Button {
                                 UIPasteboard.general.string = code
-                                copied = true
+                                toast.show("招待コードをコピーしました", systemImage: "doc.on.doc.fill", tint: Theme.accent)
                             } label: {
                                 LabeledContent("招待コード") {
                                     HStack(spacing: 6) {
                                         Text(code).monospaced()
-                                        Image(systemName: copied ? "checkmark" : "doc.on.doc")
+                                        Image(systemName: "doc.on.doc")
                                     }
                                 }
                             }
                             .foregroundStyle(Color.primary)
-                            .sensoryFeedback(.success, trigger: copied)
                             .accessibilityHint("タップでコピーします")
                         } footer: {
                             Text("保護者の方を招待するときに使います。タップでコピーできます。")
@@ -135,13 +159,16 @@ struct StudySettingsView: View {
     @State private var grade: GradeLevel = .high
     @State private var minutes: Int = 120
 
+    /// 画面と同じ丸め・既定値で比べる (サーバ値が 15 分刻みでなくても、開いただけで変更扱いにしない)。
     private var isDirty: Bool {
         guard let o = original else { return false }
-        return o.gradeLevel != grade || o.dailyAvailableMinutes != minutes
+        return (o.gradeLevel ?? .high) != grade || Self.rounded(o.dailyAvailableMinutes) != minutes
     }
 
+    private static func rounded(_ m: Int) -> Int { min(720, max(15, (m / 15) * 15)) }
+
     var body: some View {
-        SettingsForm(title: "学年・学習時間", isDirty: isDirty, load: load, save: save) {
+        SettingsForm(title: "学年・学習時間", isDirty: isDirty, values: [AnyHashable(grade), AnyHashable(minutes)], load: load, save: save) {
             Section {
                 Picker("学年", selection: $grade) {
                     ForEach(GradeLevel.allCases) { g in Text(g.label).tag(g) }
@@ -164,12 +191,13 @@ struct StudySettingsView: View {
         original = s
         grade = s.gradeLevel ?? .high
         // 15 分刻みの選択肢に丸める。
-        minutes = min(720, max(15, (s.dailyAvailableMinutes / 15) * 15))
+        minutes = Self.rounded(s.dailyAvailableMinutes)
     }
 
     private func save() async throws {
         try await SettingsRepository(api: auth.api)
             .patchProfile(.init(display_name: nil, grade_level: grade.rawValue, daily_minutes: minutes))
+        if let o = original { original = o.with(grade: grade, dailyMinutes: minutes) }
     }
 }
 
@@ -188,7 +216,7 @@ struct PomodoroSettingsView: View {
     }
 
     var body: some View {
-        SettingsForm(title: "ポモドーロ", isDirty: isDirty, load: load, save: save) {
+        SettingsForm(title: "ポモドーロ", isDirty: isDirty, values: [work, short, long], load: load, save: save) {
             Section {
                 Stepper("作業 \(work)分", value: $work, in: 5...90, step: 5)
                 Stepper("休憩 \(short)分", value: $short, in: 1...30)
@@ -210,6 +238,7 @@ struct PomodoroSettingsView: View {
     private func save() async throws {
         try await SettingsRepository(api: auth.api)
             .patchPomodoro(.init(work_minutes: work, break_minutes: short, long_break_minutes: long))
+        if let o = original { original = o.with(work: work, shortBreak: short, longBreak: long) }
     }
 }
 
@@ -224,7 +253,7 @@ struct NotificationsSettingsView: View {
     private var isDirty: Bool { original != nil && original != prefs }
 
     var body: some View {
-        SettingsForm(title: "通知", isDirty: isDirty, load: load, save: save) {
+        SettingsForm(title: "通知", isDirty: isDirty, values: prefs, load: load, save: save) {
             if systemDenied {
                 Section {
                     Button("iPhone の設定で通知を許可する") {
@@ -282,6 +311,7 @@ struct NotificationsSettingsView: View {
                 meetingReminders: prefs.meetingReminders ?? true,
                 meetingReminderMinutes: prefs.meetingReminderMinutes ?? 30
         ))
+        original = prefs
     }
 }
 

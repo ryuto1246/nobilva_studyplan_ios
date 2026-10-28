@@ -14,8 +14,13 @@ final class TodayViewModel: ObservableObject {
     @Published private(set) var summary: DashboardSummary?
     @Published private(set) var unscheduledTasks: [StudentTask] = []
     @Published var errorMessage: String?
-    /// 楽観的に切り替えた完了状態 (id → isDone)。再取得で破棄する。
-    @Published private var overrides: [String: Bool] = [:]
+    /// 表示中のデータがある状態で再取得に失敗した時刻 (View がトーストで知らせる)。
+    @Published private(set) var refreshFailedAt: Date?
+    /// 楽観的に切り替えた完了状態。直後の再取得ではまだ古い状態が返ることがあるので、
+    /// 再取得のたびに消さず、切り替えから一定時間は手元の状態を優先する。
+    private struct Override { let done: Bool; let at: Date }
+    @Published private var overrides: [String: Override] = [:]
+    private static let overrideLifetime: TimeInterval = 30
 
     private var api: APIClient?
 
@@ -26,7 +31,7 @@ final class TodayViewModel: ObservableObject {
     private var today: String { JSTDate.todayString() }
 
     private func apply(_ item: StudyItem) -> StudyItem {
-        guard let done = overrides[item.id], done != item.isDone else { return item }
+        guard let done = overrides[item.id]?.done, done != item.isDone else { return item }
         return item.withDone(done)
     }
 
@@ -68,7 +73,12 @@ final class TodayViewModel: ObservableObject {
         unscheduledTasks.map { apply(StudyItem(task: $0)) }.filter { !$0.isDone }
     }
 
-    func task(id: String) -> StudentTask? { unscheduledTasks.first { $0.id == id } }
+    /// 編集できるタスク (日付未定・期限切れ)。計画アイテムは nil。
+    func task(id: String) -> StudentTask? {
+        unscheduledTasks.first { $0.id == id } ?? summary?.overdueTasks.first { $0.id == id }
+    }
+
+    var overdueOpenCount: Int { overdueItems.filter { !$0.isDone }.count }
 
     var upcomingMeeting: Meeting? {
         guard let m = summary?.upcomingMeeting, m.isUpcoming else { return nil }
@@ -97,14 +107,16 @@ final class TodayViewModel: ObservableObject {
         switch await summaryResult {
         case .success(let s):
             summary = s
-            overrides = [:]
+            overrides = overrides.filter { Date().timeIntervalSince($0.value.at) < Self.overrideLifetime }
             loadState = .loaded
         case .failure(let error):
-            if summary == nil {
+            if summary == nil || summary?.today?.date != today {
+                // 表示できるのが前日のデータだけなら、「今日」として見せない。
+                summary = nil
                 loadState = .failed
             } else if !(error is CancellationError), (error as? APIError)?.isCancelled != true {
-                // 表示中のデータは残し、更新できなかったことだけ伝える。
-                errorMessage = "最新の情報を読み込めませんでした。"
+                // 表示中のデータは残し、更新できなかったことだけ控えめに伝える。
+                refreshFailedAt = Date()
             }
         }
         if case .success(let tasks) = await tasksResult {
@@ -114,17 +126,28 @@ final class TodayViewModel: ObservableObject {
 
     // MARK: - Mutations
 
-    /// 完了トグル。失敗したら元に戻してエラーを出す。
-    func toggle(_ item: StudyItem) async {
-        guard let api else { return }
+    /// 完了トグル。失敗したら元に戻してエラーを出す。成功したら true。
+    @discardableResult
+    func toggle(_ item: StudyItem) async -> Bool {
+        guard let api else { return false }
         let next = !item.isDone
-        overrides[item.id] = next
+        let previous = overrides[item.id]
+        overrides[item.id] = Override(done: next, at: Date())
         do {
             try await TodayRepository(api: api).setDone(item, done: next)
+            return true
         } catch {
-            overrides[item.id] = nil
+            // 連打していても、この操作の前の状態に戻す。
+            if overrides[item.id]?.done == next { overrides[item.id] = previous }
             errorMessage = "更新できませんでした。通信状況を確認してください。"
+            return false
         }
+    }
+
+    /// 削除したタスクを、再取得を待たずに一覧から外す
+    /// (削除直後の再取得では、まだ古い一覧が返ることがある)。
+    func removeTask(id: String) {
+        unscheduledTasks.removeAll { $0.id == id }
     }
 }
 

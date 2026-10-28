@@ -9,6 +9,16 @@ final class AppRouter: ObservableObject {
     @Published var timerPresented: Bool = false
     @Published var consulting: ConsultRequest?
 
+    init() {
+        NotificationCenter.default.addObserver(forName: .userDidSignOut, object: nil, queue: .main) { [weak self] _ in
+            MainActor.assumeIsolated {
+                self?.timerPresented = false
+                self?.consulting = nil
+                self?.selectedTab = .today
+            }
+        }
+    }
+
     struct ConsultRequest: Identifiable {
         let id = UUID()
         let card: ChatTaskCard

@@ -19,7 +19,7 @@ struct ChatThreadListView: View {
                 } else if loadFailed && contacts.isEmpty {
                     RetryStateView { await load() }
                 } else if contacts.isEmpty {
-                    ContentUnavailableView("話せる先生がまだいません", systemImage: "bubble.left.and.bubble.right",
+                    ContentUnavailableView("チャットできる先生はまだいません", systemImage: "bubble.left.and.bubble.right",
                                            description: Text("担当の先生が決まると、ここからチャットできます。"))
                 } else {
                     ScrollView {
@@ -44,8 +44,9 @@ struct ChatThreadListView: View {
             }
             .refreshable { await load() }
             .onChange(of: scenePhase) { _, p in if p == .active { Task { await load() } } }
-            .timerAccessory()
         }
+        // push 先の画面でも計測バーを出すため、NavigationStack の外側に付ける。
+        .timerAccessory()
     }
 
     private func load() async {

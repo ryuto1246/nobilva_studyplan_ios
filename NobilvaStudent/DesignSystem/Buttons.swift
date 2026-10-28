@@ -1,6 +1,6 @@
 import SwiftUI
 
-/// 画面の主操作。横幅いっぱい・最低 50pt の高さで、処理中はスピナーに切り替わる。
+/// 画面の主操作。横幅いっぱいで、処理中はスピナーに切り替わる。
 struct PrimaryButton: View {
     let title: String
     var systemImage: String? = nil

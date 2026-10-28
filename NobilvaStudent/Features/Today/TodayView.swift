@@ -1,4 +1,5 @@
 import SwiftUI
+import UIKit
 
 /// 「今日」タブ。生徒が開いた瞬間に「今なにをやればいいか」が分かることだけを目的にする。
 ///
@@ -13,12 +14,12 @@ struct TodayView: View {
     @EnvironmentObject var auth: AuthStore
     @EnvironmentObject var router: AppRouter
     @EnvironmentObject var timer: StudyTimer
+    @EnvironmentObject var toast: ToastCenter
     @Environment(\.scenePhase) private var scenePhase
     @StateObject private var vm = TodayViewModel()
 
     @State private var showAddTask = false
     @State private var editingTask: StudentTask?
-    @State private var showCompleted = false
 
     var body: some View {
         NavigationStack {
@@ -44,16 +45,20 @@ struct TodayView: View {
                     Task { await vm.load() }
                 }
                 .sheet(isPresented: $showAddTask) {
-                    TaskFormView(existing: nil) { Task { await vm.load() } }
+                    TaskFormView(existing: nil) { handleFormOutcome($0) }
                         .environmentObject(auth)
                 }
                 .sheet(item: $editingTask) { task in
-                    TaskFormView(existing: task) { Task { await vm.load() } }
+                    TaskFormView(existing: task) { handleFormOutcome($0) }
                         .environmentObject(auth)
                 }
                 .errorAlert($vm.errorMessage)
-                .timerAccessory()
+                .onChange(of: vm.refreshFailedAt) { _, at in
+                    if at != nil { toast.showError("最新の情報を読み込めませんでした") }
+                }
         }
+        // push 先の画面でも計測バーを出すため、NavigationStack の外側に付ける。
+        .timerAccessory()
     }
 
     @ViewBuilder
@@ -73,7 +78,6 @@ struct TodayView: View {
                     nextUpSection
                     if vm.upcomingMeeting?.isToday != true { meetingSection }
                     unscheduledSection
-                    completedSection
                     allPlansLink
                 }
                 .padding(.horizontal, 16)
@@ -101,10 +105,13 @@ struct TodayView: View {
         .accessibilityElement(children: .combine)
     }
 
+    /// 分母は今日の計画だけ。期限切れのタスクは別に数える (混ぜると数が合わなくなる)。
     private var progressText: String {
-        let remain = vm.actionable.count
-        if remain == 0 { return "今日の計画 \(vm.todayPlanCount)件 すべて完了" }
-        return "今日の計画 \(vm.todayDoneCount)/\(vm.todayPlanCount)件 完了 · 残り\(remain)件 約\(formatMinutes(vm.remainingMinutes))"
+        var parts = [vm.todayDoneCount == vm.todayPlanCount
+                     ? "今日の計画 \(vm.todayPlanCount)件 すべて完了"
+                     : "今日の計画 \(vm.todayDoneCount)/\(vm.todayPlanCount)件 完了"]
+        if vm.overdueOpenCount > 0 { parts.append("遅れているタスク \(vm.overdueOpenCount)件") }
+        return parts.joined(separator: " · ")
     }
 
     @ViewBuilder
@@ -114,17 +121,22 @@ struct TodayView: View {
                 item: focus,
                 isTiming: timer.hasSession,
                 onStart: { router.startTimer(for: focus, timer: timer) },
-                onComplete: { Task { await vm.toggle(focus) } },
+                onComplete: { toggle(focus) },
                 onConsult: { router.consult(focus) }
             )
         } else if vm.todayPlanCount > 0 || !vm.completedToday.isEmpty {
             allDoneSection
         } else {
-            InlineEmptyState(
-                title: "今日の計画はまだありません",
-                message: "何をやるか迷ったら、チャットで先生に相談しましょう。",
-                systemImage: "sun.max"
-            )
+            VStack(spacing: 12) {
+                InlineEmptyState(
+                    title: "今日の計画はまだありません",
+                    message: "何をやるか迷ったら、チャットで先生に相談しましょう。",
+                    systemImage: "sun.max"
+                )
+                SecondaryButton("チャットを開く", systemImage: "bubble.left.and.bubble.right") {
+                    router.selectedTab = .chat
+                }
+            }
         }
     }
 
@@ -137,6 +149,12 @@ struct TodayView: View {
                 message: "お疲れさまでした。",
                 systemImage: "checkmark.seal.fill"
             )
+            if !vm.completedToday.isEmpty {
+                SectionHeader("今日やったこと")
+                StudyItemList(items: vm.completedToday) { item in
+                    StudyItemRow(item: item, onToggle: { toggle(item) })
+                }
+            }
             if !vm.tomorrowPreview.isEmpty {
                 SectionHeader("明日の予定") {
                     if let d = vm.tomorrowDate { Text(JSTDate.monthDay(d)).foregroundStyle(.secondary) }
@@ -149,16 +167,22 @@ struct TodayView: View {
     }
 
     @ViewBuilder
+    /// 「まずはこれ」以外の今日の予定。完了したものも同じ一覧の下側に残し、今日の全体が見えるようにする。
     private var nextUpSection: some View {
-        if !vm.nextUp.isEmpty {
+        let open = vm.nextUp
+        let done = vm.completedToday
+        if !open.isEmpty || (!done.isEmpty && vm.focus != nil) {
             VStack(alignment: .leading, spacing: 10) {
-                SectionHeader("次にやること")
-                StudyItemList(items: vm.nextUp) { item in
+                SectionHeader(vm.focus == nil ? "今日の予定" : "ほかの予定")
+                StudyItemList(items: open + done) { item in
                     StudyItemRow(
                         item: item,
-                        onToggle: { Task { await vm.toggle(item) } },
-                        onTap: { router.startTimer(for: item, timer: timer) },
-                        onConsult: { router.consult(item) }
+                        onToggle: { toggle(item) },
+                        onTap: item.isDone ? nil : { router.startTimer(for: item, timer: timer) },
+                        // 計測中は ▶ を出さない (押しても今の計測が開くだけなので)。
+                        showsStartIcon: !timer.hasSession,
+                        onConsult: { router.consult(item) },
+                        onEdit: vm.task(id: item.id).map { t in { editingTask = t } }
                     )
                 }
             }
@@ -205,6 +229,32 @@ struct TodayView: View {
         }
     }
 
+    /// 完了 ⇄ 未完了を切り替え、結果をトーストで知らせる。完了は「元に戻す」で取り消せる。
+    private func toggle(_ item: StudyItem) {
+        Task {
+            guard await vm.toggle(item) else { return }
+            if !item.isDone { UINotificationFeedbackGenerator().notificationOccurred(.success) }
+            if item.isDone {
+                toast.show("未完了に戻しました", systemImage: "arrow.uturn.backward.circle.fill", tint: .secondary)
+            } else {
+                toast.show("「\(item.title)」を完了しました", actionTitle: "元に戻す") {
+                    Task { await vm.toggle(item.withDone(true)) }
+                }
+            }
+        }
+    }
+
+    private func handleFormOutcome(_ outcome: TaskFormView.Outcome) {
+        switch outcome {
+        case .added: toast.show("タスクを追加しました")
+        case .updated: toast.show("タスクを保存しました")
+        case .deleted(let id):
+            vm.removeTask(id: id)
+            toast.show("タスクを削除しました", systemImage: "trash.circle.fill", tint: .secondary)
+        }
+        Task { await vm.load() }
+    }
+
     private func joinLink(_ url: URL) -> some View {
         Link(destination: url) {
             Label("面談に参加", systemImage: "video.fill")
@@ -222,8 +272,9 @@ struct TodayView: View {
                 StudyItemList(items: open) { item in
                     StudyItemRow(
                         item: item,
-                        onToggle: { Task { await vm.toggle(item) } },
+                        onToggle: { toggle(item) },
                         onTap: { router.startTimer(for: item, timer: timer) },
+                        showsStartIcon: !timer.hasSession,
                         onConsult: { router.consult(item) },
                         onEdit: { editingTask = vm.task(id: item.id) }
                     )
@@ -232,24 +283,6 @@ struct TodayView: View {
         }
     }
 
-    @ViewBuilder
-    private var completedSection: some View {
-        let done = vm.completedToday
-        if !done.isEmpty && vm.focus != nil {
-            DisclosureGroup(isExpanded: $showCompleted) {
-                StudyItemList(items: done) { item in
-                    StudyItemRow(item: item, onToggle: { Task { await vm.toggle(item) } })
-                }
-                .padding(.top, 8)
-            } label: {
-                Text("今日完了したもの (\(done.count)件)")
-                    .font(.subheadline.weight(.semibold))
-                    .foregroundStyle(.secondary)
-            }
-            .tint(.secondary)
-            .padding(.horizontal, 4)
-        }
-    }
 
     private var allPlansLink: some View {
         NavigationLink {

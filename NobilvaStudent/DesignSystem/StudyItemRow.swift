@@ -22,24 +22,14 @@ struct StudyItemRow: View {
             if let onToggle {
                 CompletionToggle(isDone: item.isDone, title: item.title, action: onToggle)
             }
-            Button {
-                onTap?()
-            } label: {
-                HStack(alignment: .center, spacing: 8) {
-                    StudyItemText(item: item)
-                    Spacer(minLength: 0)
-                    if onTap != nil, showsStartIcon, !item.isDone {
-                        Image(systemName: "play.circle.fill")
-                            .font(.title2)
-                            .foregroundStyle(Theme.accent)
-                            .accessibilityHidden(true)
-                    }
-                }
-                .padding(.vertical, 10)
-                .contentShape(Rectangle())
+            if let onTap {
+                Button(action: onTap) { rowContent }
+                    .buttonStyle(.plain)
+                    .accessibilityHint(showsStartIcon && !item.isDone ? "タイマーを開きます" : "")
+            } else {
+                // 読み取り専用の行は Button で包まない (VoiceOver が「淡色表示」と読むため)。
+                rowContent.accessibilityElement(children: .combine)
             }
-            .buttonStyle(.plain)
-            .disabled(onTap == nil)
         }
         .padding(.leading, onToggle == nil ? 12 : 0)
         .padding(.trailing, 12)
@@ -61,6 +51,23 @@ struct StudyItemRow: View {
                 }
             }
         }
+    }
+}
+
+private extension StudyItemRow {
+    var rowContent: some View {
+        HStack(alignment: .center, spacing: 8) {
+            StudyItemText(item: item)
+            Spacer(minLength: 0)
+            if onTap != nil, showsStartIcon, !item.isDone {
+                Image(systemName: "play.circle.fill")
+                    .font(.title2)
+                    .foregroundStyle(Theme.accent)
+                    .accessibilityHidden(true)
+            }
+        }
+        .padding(.vertical, 10)
+        .contentShape(Rectangle())
     }
 }
 
@@ -143,9 +150,8 @@ struct CompletionToggle: View {
         }
         .buttonStyle(.plain)
         .sensoryFeedback(.success, trigger: isDone) { old, new in !old && new }
-        .accessibilityLabel(title)
+        .accessibilityLabel(isDone ? "未完了に戻す" : "完了にする")
         .accessibilityValue(isDone ? "完了" : "未完了")
-        .accessibilityHint(isDone ? "ダブルタップで未完了に戻します" : "ダブルタップで完了にします")
     }
 }
 

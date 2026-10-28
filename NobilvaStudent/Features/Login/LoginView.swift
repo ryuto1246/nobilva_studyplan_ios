@@ -139,7 +139,7 @@ struct LoginView: View {
             password = ""
             passkeyHint = nil
         } label: {
-            Text("違うアカウントで入る")
+            Text("別のアカウントでログイン")
                 .font(.footnote)
                 .foregroundStyle(.secondary)
         }

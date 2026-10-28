@@ -16,9 +16,11 @@ struct TimerRing: View {
         ZStack {
             Circle()
                 .stroke(Theme.separator.opacity(0.4), lineWidth: lineWidth)
+            // progress が 0 のときに線の端の丸だけが残って見えないようにする。
             Circle()
                 .trim(from: 0, to: CGFloat(max(0, min(1, progress))))
                 .stroke(tint, style: StrokeStyle(lineWidth: lineWidth, lineCap: .round))
+                .opacity(progress > 0.001 ? 1 : 0)
                 .rotationEffect(.degrees(-90))
                 .animation(.linear(duration: 0.5), value: progress)
 

@@ -3,6 +3,7 @@ import SwiftUI
 /// 使えない時間 (マイページから push)。自分の予定は追加・削除、チームの予定は反映するかを切り替える。
 struct BusySlotsEditorView: View {
     @EnvironmentObject var auth: AuthStore
+    @EnvironmentObject var toast: ToastCenter
 
     @State private var slots: [BusySlot] = []
     @State private var isLoading = true
@@ -31,6 +32,7 @@ struct BusySlotsEditorView: View {
             }
         }
         .navigationTitle("使えない時間")
+        .navigationBarTitleDisplayMode(.inline)
         .toolbar {
             ToolbarItem(placement: .topBarTrailing) {
                 Button { showAdd = true } label: { Label("追加", systemImage: "plus") }
@@ -42,6 +44,7 @@ struct BusySlotsEditorView: View {
             AddBusySlotSheet { body in
                 try await BusySlotsRepository(api: auth.api).create(body)
                 await load()
+                toast.show("「\(body.title)」を追加しました")
             }
         }
         .errorAlert($errorMessage)
@@ -106,6 +109,7 @@ struct BusySlotsEditorView: View {
         do {
             try await BusySlotsRepository(api: auth.api).delete(s.id)
             NotificationCenter.default.post(name: .studyDataDidChange, object: nil)
+            toast.show("「\(s.title)」を削除しました", systemImage: "trash.circle.fill", tint: .secondary)
         } catch {
             slots = snapshot
             errorMessage = (error as? APIError)?.errorDescription ?? "削除できませんでした"

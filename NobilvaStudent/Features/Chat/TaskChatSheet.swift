@@ -2,7 +2,7 @@ import SwiftUI
 
 /// タスク行の「相談する」ボタンから開くシート。
 /// Web `TaskChatButton` と同じく 2 段構成:
-///  1. 講師を選ぶ (単独講師でもタップして進む)
+///  1. 先生を選ぶ (先生が 1 人だけなら省略)
 ///  2. 相談内容を入力して送信
 ///
 /// 送信は `ChatRepository.sendTaskConsultation` に委ね、成功時は onSuccess を呼び出す。
@@ -64,7 +64,7 @@ struct TaskChatSheet: View {
             if let partners {
                 if partners.isEmpty {
                     Section {
-                        Text("相談できる講師がまだ登録されていません。")
+                        Text("相談できる先生がまだいません。")
                             .font(.subheadline)
                             .foregroundStyle(.secondary)
                     }
@@ -113,7 +113,7 @@ struct TaskChatSheet: View {
                     .listRowInsets(EdgeInsets(top: 8, leading: 16, bottom: 8, trailing: 16))
                     .listRowBackground(Color.clear)
             } header: {
-                Text("相談するやること").textCase(nil)
+                Text("相談する内容").textCase(nil)
             }
 
             Section("相談内容") {
@@ -123,7 +123,7 @@ struct TaskChatSheet: View {
                     .disabled(isSending)
             }
         }
-        .navigationTitle("\(teacher.displayName) 先生に相談")
+        .navigationTitle("\(teacher.displayName.hasSuffix("先生") ? teacher.displayName : teacher.displayName + " 先生")に相談")
         .toolbar {
             ToolbarItem(placement: .confirmationAction) {
                 if isSending {
@@ -173,7 +173,7 @@ struct TaskChatSheet: View {
         } catch let e as APIError {
             if partners == nil { errorMessage = e.errorDescription }
         } catch {
-            if partners == nil { errorMessage = "講師一覧の取得に失敗しました" }
+            if partners == nil { errorMessage = "先生の一覧を読み込めませんでした" }
         }
     }
 

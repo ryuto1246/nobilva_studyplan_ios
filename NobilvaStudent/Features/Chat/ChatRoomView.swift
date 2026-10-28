@@ -21,7 +21,7 @@ struct ChatRoomView: View {
     @State private var isLoading = true
     @State private var errorMessage: String?
     @State private var photoPickerItem: PhotosPickerItem?
-    @State private var viewingImage: URL?
+    @State private var viewingImage: ViewingImage?
     /// 最後のメッセージが画面内にあるか (新着で自動スクロールしてよいか)。
     @State private var isAtBottom = true
     @FocusState private var isInputFocused: Bool
@@ -60,8 +60,8 @@ struct ChatRoomView: View {
             .onChange(of: scenePhase) { _, p in if p == .active { Task { await load() } } }
             .onDisappear { Task { await chatUnread.refresh() } }
             .errorAlert($errorMessage)
-            .fullScreenCover(item: $viewingImage) { url in
-                ChatImageViewer(url: url)
+            .fullScreenCover(item: $viewingImage) { v in
+                ChatImageViewer(url: v.url)
             }
     }
 
@@ -122,7 +122,7 @@ struct ChatRoomView: View {
             NoticeMessage(message: m)
         } else {
             MessageBubble(message: m, isMine: m.senderId == auth.currentUser?.id) { url in
-                viewingImage = url
+                viewingImage = ViewingImage(url: url)
             }
         }
     }
@@ -246,6 +246,10 @@ struct ChatRoomView: View {
     /// 送信して、成功したら一覧を取り直して仮表示を消す。失敗したら「再送」を出す (本文は残す)。
     private func deliver(_ p: PendingMessage) async {
         do {
+            // スレッドをまだ作れていなければ、ここで作ってから送る (再送でも同じ)。
+            if threadId == nil, let teacherId {
+                threadId = try await repo().createOrGetThread(teacherId: teacherId).threadId
+            }
             guard let threadId else { throw APIError.invalidResponse }
             if let data = p.imageData {
                 _ = try await repo().sendImage(threadId: threadId, imageData: data, contentType: "image/jpeg", caption: nil)
@@ -285,8 +289,10 @@ struct ChatRoomView: View {
     }
 }
 
-extension URL: @retroactive Identifiable {
-    public var id: String { absoluteString }
+/// 全画面で見ている画像。URL そのものに Identifiable を後付けしないための包み。
+private struct ViewingImage: Identifiable {
+    let url: URL
+    var id: String { url.absoluteString }
 }
 
 // MARK: - Parts
@@ -528,8 +534,22 @@ private extension View {
 
     /// 長押しでコピー (iOS のメッセージと同じ)。
     func copyable(_ text: String) -> some View {
-        contextMenu {
-            Button { UIPasteboard.general.string = text } label: { Label("コピー", systemImage: "doc.on.doc") }
+        modifier(CopyableModifier(text: text))
+    }
+}
+
+private struct CopyableModifier: ViewModifier {
+    let text: String
+    @EnvironmentObject private var toast: ToastCenter
+
+    func body(content: Content) -> some View {
+        content.contextMenu {
+            Button {
+                UIPasteboard.general.string = text
+                toast.show("コピーしました", systemImage: "doc.on.doc.fill", tint: Theme.accent)
+            } label: {
+                Label("コピー", systemImage: "doc.on.doc")
+            }
         }
     }
 }

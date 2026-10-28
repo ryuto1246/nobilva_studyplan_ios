@@ -29,7 +29,7 @@ struct TimerAccessoryBar: View {
                 .contentShape(Rectangle())
             }
             .buttonStyle(.plain)
-            .accessibilityLabel("計測中: \(timer.snapshot.item?.title ?? "自由学習")、\(status)")
+            .accessibilityLabel("\(timer.isRunning ? "計測中" : "一時停止中"): \(timer.snapshot.item?.title ?? "自由学習")、\(status)")
             .accessibilityHint("タイマーを開きます")
 
             Button {
@@ -41,7 +41,7 @@ struct TimerAccessoryBar: View {
                     .contentShape(Rectangle())
             }
             .buttonStyle(.plain)
-            .disabled(timer.reading.finished)
+            .disabled(timer.reading.finished || timer.isCompleting)
             .accessibilityLabel(timer.isRunning ? "一時停止" : "再開")
         }
         .padding(.leading, 16)

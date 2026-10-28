@@ -15,6 +15,7 @@ private enum ReschedulePhase {
 
 struct MeetingDetailView: View {
     @EnvironmentObject var auth: AuthStore
+    @EnvironmentObject var toast: ToastCenter
     let meetingId: String
 
     @State private var meeting: Meeting?
@@ -56,20 +57,13 @@ struct MeetingDetailView: View {
         .task { await load() }
         .refreshable { await load() }
         .errorAlert($errorMessage)
-        .confirmationDialog("この面談をキャンセルしますか？", isPresented: $showCancelConfirm, titleVisibility: .visible) {
-            Button("面談をキャンセル", role: .destructive) { Task { await perform { try await repo.cancel(meetingId, note: nil) } } }
-        } message: {
-            Text("先生に通知されます。日程を変えたいだけなら「日程の変更を希望する」を使ってください。")
-        }
-        .confirmationDialog("提案された日時で確定しますか？", isPresented: $showAcceptConfirm, titleVisibility: .visible) {
-            Button("この日時で確定") { Task { await perform { try await repo.acceptProposal(meetingId) } } }
-        }
         .sheet(isPresented: $showRequestSheet) {
             NoteSheet(title: "日程の変更を希望",
                       description: "先生に「日程を変えたい」ことを伝えます。新しい日時は先生が提案します。",
                       placeholder: "例: 塾があるので別の日にしたいです",
                       requireNote: true, submitLabel: "送信") { note in
                 try await repo.requestReschedule(meetingId, note: note)
+                toast.show("日程の変更を希望しました")
                 await load()
             }
         }
@@ -79,12 +73,14 @@ struct MeetingDetailView: View {
                       placeholder: "例: その日は部活があります",
                       requireNote: false, submitLabel: "見送る") { note in
                 try await repo.rejectProposal(meetingId, note: note)
+                toast.show("提案を見送りました")
                 await load()
             }
         }
         .sheet(isPresented: $showProposalSheet) {
             ProposalSheet { start, duration, note in
                 try await repo.proposeReschedule(meetingId, start: start, durationMinutes: duration, note: note)
+                toast.show("新しい日時を提案しました")
                 await load()
             }
         }
@@ -113,6 +109,13 @@ struct MeetingDetailView: View {
                             }
                             Button("面談をキャンセル", role: .destructive) { showCancelConfirm = true }
                                 .frame(minHeight: 44)
+                                .confirmationDialog("この面談をキャンセルしますか？", isPresented: $showCancelConfirm, titleVisibility: .visible) {
+                                    Button("面談をキャンセル", role: .destructive) {
+                                        Task { await perform("面談をキャンセルしました") { try await repo.cancel(meetingId, note: nil) } }
+                                    }
+                                } message: {
+                                    Text("先生に通知されます。日程を変えたいだけなら「日程の変更を希望する」を使ってください。")
+                                }
                         }
                         .disabled(busy)
                     } else {
@@ -208,12 +211,17 @@ struct MeetingDetailView: View {
                 PrimaryButton("新しい日時を提案する", systemImage: "calendar.badge.plus") { showProposalSheet = true }
             case .proposedByOther:
                 PrimaryButton("この日時で確定", systemImage: "checkmark") { showAcceptConfirm = true }
+                    .confirmationDialog("提案された日時で確定しますか？", isPresented: $showAcceptConfirm, titleVisibility: .visible) {
+                        Button("この日時で確定") {
+                            Task { await perform("面談の日時を確定しました") { try await repo.acceptProposal(meetingId) } }
+                        }
+                    }
                 SecondaryButton("別の日時を提案", systemImage: "calendar.badge.plus") { showProposalSheet = true }
                 Button("見送る", role: .destructive) { showRejectSheet = true }
                     .frame(minHeight: 44)
             case .requestedByMe, .proposedByMe:
                 SecondaryButton("取り下げる", systemImage: "arrow.uturn.backward", isLoading: busy) {
-                    Task { await perform { try await repo.withdrawReschedule(meetingId) } }
+                    Task { await perform("取り下げました") { try await repo.withdrawReschedule(meetingId) } }
                 }
             case .none:
                 EmptyView()
@@ -237,11 +245,12 @@ struct MeetingDetailView: View {
         }
     }
 
-    private func perform(_ op: () async throws -> Void) async {
+    private func perform(_ doneMessage: String, _ op: () async throws -> Void) async {
         busy = true
         defer { busy = false }
         do {
             try await op()
+            toast.show(doneMessage)
             await load()
             NotificationCenter.default.post(name: .studyDataDidChange, object: nil)
         } catch {
