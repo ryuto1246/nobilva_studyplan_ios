@@ -90,7 +90,6 @@ struct TodayView: View {
                         if vm.upcomingMeeting?.isToday != true { meetingSection }
                         unscheduledSection
                         completedSection
-                        allPlansLink
                     }
                     .padding(.horizontal, 16)
                     .padding(.bottom, 24)
@@ -329,20 +328,5 @@ struct TodayView: View {
                 }
             }
         }
-    }
-
-
-    private var allPlansLink: some View {
-        NavigationLink {
-            PlanListView()
-        } label: {
-            Label("これからの計画をすべて見る", systemImage: "calendar")
-                .font(.body.weight(.semibold))
-                .frame(maxWidth: .infinity, minHeight: 34)
-                .foregroundStyle(Color.primary)
-        }
-        // 画面の主操作 (取り組む・面談に参加) と色を競わないよう、灰色の控えめなボタンにする。
-        .buttonStyle(.bordered)
-        .tint(.secondary)
     }
 }
