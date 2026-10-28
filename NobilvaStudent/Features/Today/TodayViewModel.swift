@@ -170,6 +170,13 @@ final class TodayViewModel: ObservableObject {
             recordedToday.insert(item.id)
             NotificationCenter.default.post(name: .studyDataDidChange, object: nil)
             return true
+        } catch is TodayRepository.RecordedButNotCompleted {
+            // 時間は記録済み。次に完了を押したときは記録を促さず、完了だけにする。
+            recordedToday.insert(item.id)
+            overrides[item.id] = previous
+            NotificationCenter.default.post(name: .studyDataDidChange, object: nil)
+            errorMessage = TodayRepository.recordedButNotCompletedMessage
+            return false
         } catch {
             overrides[item.id] = previous
             errorMessage = "記録できませんでした。通信状況を確認してください。"

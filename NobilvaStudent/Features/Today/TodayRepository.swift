@@ -36,10 +36,19 @@ struct TodayRepository {
 
     /// かかった時間を手動で記録して完了にする。計画アイテムは記録 API がそのまま完了にし、
     /// タスクは記録 (紐付けなし) のあとに完了にする。
+    /// 記録はできたが完了にできなかった (タスクのみ)。もう一度記録させないよう呼び出し側で区別する。
+    struct RecordedButNotCompleted: Error {}
+    static let recordedButNotCompletedMessage = "時間は記録しましたが、完了にできませんでした。もう一度「完了」を押してください。"
+
     func recordAndComplete(_ item: StudyItem, minutes: Int) async throws {
         let _: SessionCompletedResponse = try await TimerRepository(api: api)
             .manual(planItemId: item.planItemId, durationMinutes: minutes)
-        if item.kind == .task { try await setTaskStatus(item.id, status: .completed) }
+        guard item.kind == .task else { return }
+        do {
+            try await setTaskStatus(item.id, status: .completed)
+        } catch {
+            throw RecordedButNotCompleted()
+        }
     }
 
     /// StudentTask のステータス更新 (期限切れタスクの完了トグル用)。
