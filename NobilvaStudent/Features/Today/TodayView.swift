@@ -20,6 +20,7 @@ struct TodayView: View {
 
     @State private var showAddTask = false
     @State private var editingTask: StudentTask?
+    @State private var showCompleted = false
 
     var body: some View {
         NavigationStack {
@@ -78,6 +79,7 @@ struct TodayView: View {
                     nextUpSection
                     if vm.upcomingMeeting?.isToday != true { meetingSection }
                     unscheduledSection
+                    completedSection
                     allPlansLink
                 }
                 .padding(.horizontal, 16)
@@ -167,23 +169,36 @@ struct TodayView: View {
     }
 
     @ViewBuilder
-    /// 「まずはこれ」以外の今日の予定。完了したものも同じ一覧の下側に残し、今日の全体が見えるようにする。
     private var nextUpSection: some View {
-        let open = vm.nextUp
-        let done = vm.completedToday
-        if !open.isEmpty || (!done.isEmpty && vm.focus != nil) {
+        if !vm.nextUp.isEmpty {
             VStack(alignment: .leading, spacing: 10) {
-                SectionHeader(vm.focus == nil ? "今日の予定" : "ほかの予定")
-                StudyItemList(items: open + done) { item in
+                SectionHeader("次にやること")
+                StudyItemList(items: vm.nextUp) { item in
                     StudyItemRow(
                         item: item,
                         onToggle: { toggle(item) },
-                        onTap: item.isDone ? nil : { router.startTimer(for: item, timer: timer) },
+                        onTap: { router.startTimer(for: item, timer: timer) },
                         // 計測中は ▶ を出さない (押しても今の計測が開くだけなので)。
                         showsStartIcon: !timer.hasSession,
                         onConsult: { router.consult(item) },
                         onEdit: vm.task(id: item.id).map { t in { editingTask = t } }
                     )
+                }
+            }
+        }
+    }
+
+    /// 今日完了したもの。やることの一覧とは分けて、折りたたんで置く。
+    @ViewBuilder
+    private var completedSection: some View {
+        let done = vm.completedToday
+        if !done.isEmpty && vm.focus != nil {
+            VStack(alignment: .leading, spacing: 8) {
+                CollapsibleHeader(title: "今日完了したもの (\(done.count)件)", isExpanded: $showCompleted)
+                if showCompleted {
+                    StudyItemList(items: done) { item in
+                        StudyItemRow(item: item, onToggle: { toggle(item) })
+                    }
                 }
             }
         }
