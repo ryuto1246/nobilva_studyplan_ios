@@ -82,10 +82,10 @@ struct TodayView: View {
                         // 面談の当日は、やることより先に面談を見せる。
                         if vm.upcomingMeeting?.isToday == true { meetingSection }
                         focusSection
-                            .tourTarget(vm.focus != nil ? .todayFocus : nil)
+                            .tourTarget(focusItem != nil ? .todayFocus : nil)
                             .id(TourTarget.todayFocus)
                         nextUpSection
-                            .tourTarget(vm.nextUp.isEmpty ? nil : .todayNextUp)
+                            .tourTarget(nextUpItems.isEmpty ? nil : .todayNextUp)
                             .id(TourTarget.todayNextUp)
                         if vm.upcomingMeeting?.isToday != true { meetingSection }
                         unscheduledSection
@@ -104,6 +104,15 @@ struct TodayView: View {
     }
 
     // MARK: - Sections
+
+    /// 計画がまだ無い生徒のツアー中は、見本を出して場所を指せるようにする。
+    private var focusItem: StudyItem? {
+        vm.focus ?? (tour.isActive ? TourSample.focus : nil)
+    }
+
+    private var nextUpItems: [StudyItem] {
+        vm.nextUp.isEmpty && tour.isActive ? TourSample.nextUp : vm.nextUp
+    }
 
     /// 日付と「何件中何件」を 1 行で。大きな挨拶は置かず、情報だけを静かに見せる。
     private var progressHeader: some View {
@@ -133,7 +142,7 @@ struct TodayView: View {
 
     @ViewBuilder
     private var focusSection: some View {
-        if let focus = vm.focus {
+        if let focus = focusItem {
             FocusCard(
                 item: focus,
                 isTiming: timer.hasSession,
@@ -185,10 +194,10 @@ struct TodayView: View {
 
     @ViewBuilder
     private var nextUpSection: some View {
-        if !vm.nextUp.isEmpty {
+        if !nextUpItems.isEmpty {
             VStack(alignment: .leading, spacing: 10) {
                 SectionHeader("次にやること")
-                StudyItemList(items: vm.nextUp, style: .plain) { item in
+                StudyItemList(items: nextUpItems, style: .plain) { item in
                     StudyItemRow(
                         item: item,
                         onToggle: { toggle(item) },
@@ -263,6 +272,7 @@ struct TodayView: View {
     /// 押した瞬間に表示・トースト・振動を返す (通信は数秒かかることがあるため待たない)。
     /// 失敗したら表示を戻し、エラーを出す。
     private func toggle(_ item: StudyItem) {
+        guard !TourSample.isSample(item) else { return }
         // タイマーを使わずに完了するときは、かかった時間を記録するよう促す。
         if vm.shouldAskRecordTime(item) {
             router.askRecordTime(for: item) { choice in

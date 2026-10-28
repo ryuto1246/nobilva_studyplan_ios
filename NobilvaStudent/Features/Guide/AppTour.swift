@@ -11,6 +11,8 @@ import SwiftUI
 ///    読んで暗幕 + くり抜きを描く。
 ///  - anchorPreference は TabView / toolbar を越えて伝わらないため、
 ///    座標を共有ストアに集める方式にしている。
+///  - 計画や先生がまだ無い生徒でも場所を指せるよう、ツアー中だけ `TourSample` の
+///    見本を出す。ツアー中は暗幕が操作を止めるので、見本が送信されることはない。
 
 /// ツアーで指し示す場所。`.id()` にも使うので Hashable。
 enum TourTarget: String, Hashable {
@@ -68,15 +70,31 @@ final class TourController: ObservableObject {
     /// nil = ツアー非表示。
     @Published private(set) var index: Int?
     let geometry = TourGeometry()
+    /// 見たかどうかは生徒ごとに覚える (同じ端末を別の生徒が使うこともあるため)。
+    var userId: String?
 
-    private static let completedKey = "tour.completed.v1"
+    private var completedKey: String { "tour.completed.v1.\(userId ?? "-")" }
+    private var signOutObserver: NSObjectProtocol?
 
     var steps: [TourStep] { TourStep.all }
     var current: TourStep? { index.map { steps[$0] } }
     var isActive: Bool { index != nil }
 
     var hasCompleted: Bool {
-        UserDefaults.standard.bool(forKey: Self.completedKey)
+        UserDefaults.standard.bool(forKey: completedKey)
+    }
+
+    init() {
+        // ツアー中に強制ログアウトされても、次のログインに途中のツアーを持ち越さない。
+        signOutObserver = NotificationCenter.default.addObserver(
+            forName: .userDidSignOut, object: nil, queue: .main
+        ) { [weak self] _ in
+            MainActor.assumeIsolated {
+                self?.geometry.isPublishing = false
+                self?.index = nil
+                self?.userId = nil
+            }
+        }
     }
 
     func start() {
@@ -100,7 +118,7 @@ final class TourController: ObservableObject {
 
     /// 最後まで見た / スキップした のどちらでも完了扱い (初回自動表示は 1 度きり)。
     func finish() {
-        UserDefaults.standard.set(true, forKey: Self.completedKey)
+        UserDefaults.standard.set(true, forKey: completedKey)
         geometry.isPublishing = false
         withAnimation(.easeInOut(duration: 0.25)) { index = nil }
     }
@@ -196,6 +214,9 @@ struct TourOverlay: View {
                 .animation(.spring(duration: 0.35), value: hole)
             }
             .ignoresSafeArea()
+            // VoiceOver でも下の画面に移らず、吹き出しだけを読ませる。
+            .accessibilityElement(children: .contain)
+            .accessibilityAddTraits(.isModal)
             .transition(.opacity)
         }
     }
@@ -224,6 +245,7 @@ struct TourOverlay: View {
                     }
                     .compositingGroup()
             }
+            .accessibilityHidden(true)
             // ツアー中は下の画面を触れないようにする (説明に集中してもらう)。
             .contentShape(Rectangle())
             .onTapGesture {}
@@ -303,5 +325,35 @@ private struct TourBubble: View {
         .shadow(color: .black.opacity(0.25), radius: 16, y: 6)
         .id(index)
         .transition(.opacity)
+    }
+}
+
+// MARK: - Sample
+
+/// 計画や先生がまだ無いときに、ツアー中だけ出す見本。
+enum TourSample {
+    private static let idPrefix = "tour-sample-"
+
+    static func isSample(_ item: StudyItem) -> Bool { item.id.hasPrefix(idPrefix) }
+
+    static let focus = item(1, title: "教科書 p.24〜27（例題5問）", subject: "数学", start: "16:00", minutes: 30,
+                            note: "これは見本です。先生が計画を立てると、ここに表示されます。")
+
+    static let nextUp = [
+        item(2, title: "英単語 Unit 3（30語）", subject: "英語", start: "17:00", minutes: 20),
+        item(3, title: "理科 ワーク p.12", subject: "理科", start: "19:00", minutes: 30),
+    ]
+
+    static let contact = ChatContact(
+        id: idPrefix + "contact", teacherId: nil, threadId: nil, name: "先生 (見本)",
+        lastBody: "わからないところがあれば、いつでも聞いてくださいね。", lastAt: nil, unread: 0
+    )
+
+    private static func item(_ n: Int, title: String, subject: String, start: String, minutes: Int,
+                             note: String? = nil) -> StudyItem {
+        StudyItem(planItem: PlanItem(
+            id: idPrefix + "\(n)", planId: "", taskId: nil, goalId: nil, title: title, subject: subject,
+            startTime: start, durationMinutes: minutes, status: .pending, rationale: note, sortOrder: n
+        ), date: nil)
     }
 }

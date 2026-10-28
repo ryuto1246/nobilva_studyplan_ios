@@ -4,6 +4,7 @@ import SwiftUI
 /// 各カードに最後のメッセージ (吹き出し)・時刻・未読数と、その先生との次の面談を出す。
 struct ChatThreadListView: View {
     @EnvironmentObject var auth: AuthStore
+    @EnvironmentObject var tour: TourController
     @Environment(\.scenePhase) private var scenePhase
 
     @State private var contacts: [ChatContact] = []
@@ -14,24 +15,24 @@ struct ChatThreadListView: View {
     var body: some View {
         NavigationStack {
             Group {
-                if isLoading && contacts.isEmpty {
-                    LoadingStateView()
-                } else if loadFailed && contacts.isEmpty {
-                    RetryStateView { await load() }
-                } else if contacts.isEmpty {
-                    ContentUnavailableView("チャットできる先生はまだいません", systemImage: "bubble.left.and.bubble.right",
-                                           description: Text("担当の先生が決まると、ここからチャットできます。"))
-                } else {
+                if !shownContacts.isEmpty {
                     ScrollView {
                         LazyVStack(spacing: 16) {
-                            ForEach(contacts) { c in
+                            ForEach(shownContacts) { c in
                                 ChatContactCard(contact: c, nextMeeting: nextMeeting(with: c))
-                                    .tourTarget(c.id == contacts.first?.id ? .chatFirstContact : nil)
+                                    .tourTarget(c.id == shownContacts.first?.id ? .chatFirstContact : nil)
                             }
                         }
                         .padding(16)
                     }
                     .background(Theme.groupedBackground.ignoresSafeArea())
+                } else if isLoading {
+                    LoadingStateView()
+                } else if loadFailed {
+                    RetryStateView { await load() }
+                } else {
+                    ContentUnavailableView("チャットできる先生はまだいません", systemImage: "bubble.left.and.bubble.right",
+                                           description: Text("担当の先生が決まると、ここからチャットできます。"))
                 }
             }
             .navigationTitle("チャット")
@@ -48,6 +49,11 @@ struct ChatThreadListView: View {
         }
         // push 先の画面でも計測バーを出すため、NavigationStack の外側に付ける。
         .timerAccessory()
+    }
+
+    /// 先生がまだいない生徒のツアー中は、見本のカードを出して場所を指せるようにする。
+    private var shownContacts: [ChatContact] {
+        contacts.isEmpty && tour.isActive ? [TourSample.contact] : contacts
     }
 
     private func load() async {
