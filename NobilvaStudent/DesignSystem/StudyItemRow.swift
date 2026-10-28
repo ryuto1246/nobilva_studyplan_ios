@@ -149,7 +149,6 @@ struct CompletionToggle: View {
                 .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
-        .sensoryFeedback(.success, trigger: isDone) { old, new in !old && new }
         .accessibilityLabel(isDone ? "未完了に戻す" : "完了にする")
         .accessibilityValue(isDone ? "完了" : "未完了")
     }

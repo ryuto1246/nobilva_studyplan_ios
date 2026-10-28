@@ -132,17 +132,19 @@ struct PlanListView: View {
         let next = !item.isDone
         let previous = overrides[item.id]
         overrides[item.id] = next
+        // 押した瞬間に知らせる (通信を待たない)。
+        if next {
+            toast.show("「\(item.title)」を完了しました", actionTitle: "元に戻す") {
+                Task { await toggle(item.withDone(true)) }
+            }
+        } else {
+            toast.show("未完了に戻しました", systemImage: "arrow.uturn.backward.circle.fill", tint: .secondary, feel: .neutral)
+        }
         do {
             try await TodayRepository(api: auth.api).setDone(item, done: next)
             NotificationCenter.default.post(name: .studyDataDidChange, object: nil)
-            if next {
-                toast.show("「\(item.title)」を完了しました", actionTitle: "元に戻す") {
-                    Task { await toggle(item.withDone(true)) }
-                }
-            } else {
-                toast.show("未完了に戻しました", systemImage: "arrow.uturn.backward.circle.fill", tint: .secondary)
-            }
         } catch {
+            toast.dismiss()
             if overrides[item.id] == next { overrides[item.id] = previous }
             errorMessage = "更新できませんでした。通信状況を確認してください。"
         }

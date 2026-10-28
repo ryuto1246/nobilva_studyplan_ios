@@ -79,7 +79,7 @@ private struct SettingsForm<Content: View>: View {
         defer { isSaving = false }
         do {
             try await save()
-            UISelectionFeedbackGenerator().selectionChanged()
+            Haptics.success()
             withAnimation { justSaved = true }
             try? await Task.sleep(nanoseconds: 1_500_000_000)
             withAnimation { justSaved = false }
@@ -110,7 +110,7 @@ struct AccountView: View {
                         Section {
                             Button {
                                 UIPasteboard.general.string = code
-                                toast.show("招待コードをコピーしました", systemImage: "doc.on.doc.fill", tint: Theme.accent)
+                                toast.show("招待コードをコピーしました", systemImage: "doc.on.doc.fill", tint: Theme.accent, feel: .neutral)
                             } label: {
                                 LabeledContent("招待コード") {
                                     HStack(spacing: 6) {

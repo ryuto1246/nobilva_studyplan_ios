@@ -109,7 +109,7 @@ struct BusySlotsEditorView: View {
         do {
             try await BusySlotsRepository(api: auth.api).delete(s.id)
             NotificationCenter.default.post(name: .studyDataDidChange, object: nil)
-            toast.show("「\(s.title)」を削除しました", systemImage: "trash.circle.fill", tint: .secondary)
+            toast.show("「\(s.title)」を削除しました", systemImage: "trash.circle.fill", tint: .secondary, feel: .warning)
         } catch {
             slots = snapshot
             errorMessage = (error as? APIError)?.errorDescription ?? "削除できませんでした"
@@ -117,6 +117,7 @@ struct BusySlotsEditorView: View {
     }
 
     private func setApplied(_ s: BusySlot, applied: Bool) async {
+        Haptics.selection()
         optOverrides[s.id] = applied
         do {
             try await BusySlotsRepository(api: auth.api).teamEventOptOut(s.id, optOut: !applied)

@@ -69,8 +69,13 @@ final class TodayViewModel: ObservableObject {
     var tomorrowDate: String? { summary?.tomorrow?.date }
 
     /// 日付未定のタスク (未完了のみ)。
+    /// 期限切れとしてすでに上に出ているものは重ねて出さない。
     var unscheduled: [StudyItem] {
-        unscheduledTasks.map { apply(StudyItem(task: $0)) }.filter { !$0.isDone }
+        let overdueIds = Set((summary?.overdueTasks ?? []).map(\.id))
+        return unscheduledTasks
+            .filter { !overdueIds.contains($0.id) }
+            .map { apply(StudyItem(task: $0)) }
+            .filter { !$0.isDone }
     }
 
     /// 編集できるタスク (日付未定・期限切れ)。計画アイテムは nil。

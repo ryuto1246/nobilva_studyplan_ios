@@ -47,7 +47,7 @@ struct TimerView: View {
             .onDisappear { UIApplication.shared.isIdleTimerDisabled = false }
             .errorAlert($timer.errorMessage)
             // シートの上でもトーストが見えるように (アプリのルートの表示はシートの下に隠れる)。
-            .toastHost(toast, bottomInset: 24)
+            .toastHost(toast)
             .sheet(isPresented: $showManualSheet) {
                 ManualRecordSheet(todayItems: todayItems, initialPlanItemId: timer.snapshot.item?.planItemId) { minutes in
                     toast.show("\(formatMinutes(minutes))の学習を記録しました")
@@ -179,7 +179,7 @@ struct TimerView: View {
                     .confirmationDialog("記録せずに終了しますか？", isPresented: $showDiscardConfirm, titleVisibility: .visible) {
                         Button("記録せずに終了", role: .destructive) {
                             timer.discard()
-                            toast.show("計測を終了しました", systemImage: "stop.circle.fill", tint: .secondary)
+                            toast.show("計測を終了しました", systemImage: "stop.circle.fill", tint: .secondary, feel: .warning)
                         }
                     } message: {
                         Text("ここまでの\(StudyTimer.RecordEvent(seconds: Int(timer.reading.studySeconds)).label)は記録されません。")

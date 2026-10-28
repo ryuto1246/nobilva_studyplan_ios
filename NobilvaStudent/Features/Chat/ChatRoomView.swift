@@ -214,6 +214,10 @@ struct ChatRoomView: View {
             guard let threadId else { return }
             let fetched = try await repo().messages(threadId: threadId)
             let hadNew = fetched.last?.id != messages.last?.id
+            // 開いている間に相手から届いたら、軽く知らせる (初回読み込みと自分の送信は除く)。
+            if !initial, hadNew, let last = fetched.last, last.senderId != auth.currentUser?.id {
+                Haptics.tap()
+            }
             messages = fetched
             if initial || hadNew {
                 // 開いている間に届いたものも既読にする。
@@ -232,6 +236,7 @@ struct ChatRoomView: View {
         let text = trimmedDraft
         guard canSend else { return }
         draft = ""
+        Haptics.tap()
         let p = PendingMessage(body: text, imageData: nil)
         pending.append(p)
         await deliver(p)
@@ -260,6 +265,7 @@ struct ChatRoomView: View {
             pending.removeAll { $0.id == p.id }
         } catch {
             if let idx = pending.firstIndex(where: { $0.id == p.id }) { pending[idx].failed = true }
+            Haptics.error()
         }
     }
 
@@ -546,7 +552,7 @@ private struct CopyableModifier: ViewModifier {
         content.contextMenu {
             Button {
                 UIPasteboard.general.string = text
-                toast.show("コピーしました", systemImage: "doc.on.doc.fill", tint: Theme.accent)
+                toast.show("コピーしました", systemImage: "doc.on.doc.fill", tint: Theme.accent, feel: .neutral)
             } label: {
                 Label("コピー", systemImage: "doc.on.doc")
             }

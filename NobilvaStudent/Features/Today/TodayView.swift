@@ -245,17 +245,18 @@ struct TodayView: View {
     }
 
     /// 完了 ⇄ 未完了を切り替え、結果をトーストで知らせる。完了は「元に戻す」で取り消せる。
+    /// 押した瞬間に表示・トースト・振動を返す (通信は数秒かかることがあるため待たない)。
+    /// 失敗したら表示を戻し、エラーを出す。
     private func toggle(_ item: StudyItem) {
-        Task {
-            guard await vm.toggle(item) else { return }
-            if !item.isDone { UINotificationFeedbackGenerator().notificationOccurred(.success) }
-            if item.isDone {
-                toast.show("未完了に戻しました", systemImage: "arrow.uturn.backward.circle.fill", tint: .secondary)
-            } else {
-                toast.show("「\(item.title)」を完了しました", actionTitle: "元に戻す") {
-                    Task { await vm.toggle(item.withDone(true)) }
-                }
+        if item.isDone {
+            toast.show("未完了に戻しました", systemImage: "arrow.uturn.backward.circle.fill", tint: .secondary, feel: .neutral)
+        } else {
+            toast.show("「\(item.title)」を完了しました", actionTitle: "元に戻す") {
+                Task { await vm.toggle(item.withDone(true)) }
             }
+        }
+        Task {
+            if await vm.toggle(item) == false { toast.dismiss() }
         }
     }
 
@@ -265,7 +266,7 @@ struct TodayView: View {
         case .updated: toast.show("タスクを保存しました")
         case .deleted(let id):
             vm.removeTask(id: id)
-            toast.show("タスクを削除しました", systemImage: "trash.circle.fill", tint: .secondary)
+            toast.show("タスクを削除しました", systemImage: "trash.circle.fill", tint: .secondary, feel: .warning)
         }
         Task { await vm.load() }
     }

@@ -18,14 +18,23 @@ final class ToastCenter: ObservableObject {
     @Published private(set) var current: Toast?
     private var hideTask: Task<Void, Never>?
 
+    enum Feel { case success, neutral, warning, error }
+
     func show(_ message: String,
               systemImage: String = "checkmark.circle.fill",
               tint: Color = .green,
+              feel: Feel = .success,
               actionTitle: String? = nil,
               action: (() -> Void)? = nil) {
         let toast = Toast(message: message, systemImage: systemImage, tint: tint,
                           actionTitle: actionTitle, action: action)
         current = toast
+        switch feel {
+        case .success: Haptics.success()
+        case .neutral: Haptics.tap()
+        case .warning: Haptics.warning()
+        case .error: Haptics.error()
+        }
         UIAccessibility.post(notification: .announcement, argument: message)
         hideTask?.cancel()
         // 取り消しボタン付きは押す時間を少し長めに残す。
@@ -39,7 +48,7 @@ final class ToastCenter: ObservableObject {
 
     /// 失敗の知らせ (アラートを出すほどではないもの)。
     func showError(_ message: String) {
-        show(message, systemImage: "exclamationmark.circle.fill", tint: .red)
+        show(message, systemImage: "exclamationmark.circle.fill", tint: .red, feel: .error)
     }
 
     func dismiss(_ id: UUID? = nil) {
@@ -79,17 +88,17 @@ private struct ToastView: View {
 }
 
 extension View {
-    /// 画面下部 (タブバーと計測バーの上) にトーストを重ねる。アプリのルート (RootView) に付ける。
-    /// 上部だとナビゲーションバーのボタンに重なり、消えた直後の誤タップを招くため下に置く。
-    func toastHost(_ center: ToastCenter, bottomInset: CGFloat) -> some View {
-        overlay(alignment: .bottom) {
+    /// 画面上部、ナビゲーションバーのボタンより下にトーストを重ねる。
+    /// (下部は iOS 26 のタブバーの層に隠れて見えなかった。最上部はナビバーのボタンに重なる)
+    func toastHost(_ center: ToastCenter, topInset: CGFloat = 56) -> some View {
+        overlay(alignment: .top) {
             if let toast = center.current {
                 ToastView(toast: toast) {
                     toast.action?()
                     center.dismiss(toast.id)
                 }
-                .padding(.bottom, bottomInset)
-                .transition(.move(edge: .bottom).combined(with: .opacity))
+                .padding(.top, topInset)
+                .transition(.move(edge: .top).combined(with: .opacity))
                 .onTapGesture { center.dismiss(toast.id) }
                 .id(toast.id)
             }

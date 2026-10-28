@@ -152,7 +152,7 @@ final class StudyTimer: ObservableObject {
     func configure(mode: Mode? = nil, countdownMinutes: Int? = nil) {
         guard !hasSession else { return }
         var s = snapshot
-        if let mode { s.mode = mode }
+        if let mode, mode != s.mode { s.mode = mode; Haptics.selection() }
         if let countdownMinutes { s.countdownMinutes = max(1, countdownMinutes) }
         snapshot = s
     }
@@ -167,6 +167,7 @@ final class StudyTimer: ObservableObject {
     func select(_ item: StudyItem?) {
         guard !hasSession else { return }
         snapshot.item = item.map { StudyItemRef(planItemId: $0.planItemId, title: $0.title, subject: $0.subject) }
+        Haptics.selection()
     }
 
     // MARK: - Actions
@@ -183,7 +184,7 @@ final class StudyTimer: ObservableObject {
         now = startedAt
         startTick()
         scheduleNotifications()
-        UIImpactFeedbackGenerator(style: .medium).impactOccurred()
+        Haptics.impact()
         // 応答を待つ間に「記録する」「破棄」が押されてもよいよう、Task を保持して共有する。
         let task = Task { try? await self.createServerSession() }
         startTask = task
@@ -199,6 +200,7 @@ final class StudyTimer: ObservableObject {
 
     func pause() {
         guard isRunning, !isCompleting else { return }
+        Haptics.tap()
         freezeBaseline()
         stopTick()
         cancelNotifications()
@@ -206,6 +208,7 @@ final class StudyTimer: ObservableObject {
 
     func resume() {
         guard isPaused, !isCompleting, !reading.finished else { return }
+        Haptics.tap()
         snapshot.resumedAt = Date()
         now = Date()
         startTick()
@@ -238,8 +241,8 @@ final class StudyTimer: ObservableObject {
                 .complete(sessionId: sessionId, durationSeconds: seconds)
             lastRecord = RecordEvent(seconds: seconds)
             reset()
+            // 成功の振動は記録トースト側で鳴らす。
             NotificationCenter.default.post(name: .studyDataDidChange, object: nil)
-            UINotificationFeedbackGenerator().notificationOccurred(.success)
         } catch {
             errorMessage = (error as? APIError)?.errorDescription
                 ?? "記録できませんでした。通信状況を確認して、もう一度「記録する」を押してください。"
@@ -350,12 +353,15 @@ final class StudyTimer: ObservableObject {
             while !Task.isCancelled {
                 try? await Task.sleep(nanoseconds: 1_000_000_000)
                 guard let self else { return }
+                let before = self.reading.phase
                 self.now = Date()
+                // 画面を見ているときも、作業⇄休憩の切り替わりを振動で知らせる。
+                if self.snapshot.mode == .pomodoro, self.reading.phase != before { Haptics.impact() }
                 if self.reading.finished {
                     // タイマーモードの満了: 自動で一時停止し、記録を促す。
                     self.freezeBaseline()
                     self.stopTick()
-                    UINotificationFeedbackGenerator().notificationOccurred(.success)
+                    Haptics.success()
                     return
                 }
             }

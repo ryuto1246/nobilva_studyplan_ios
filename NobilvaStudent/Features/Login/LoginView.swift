@@ -294,13 +294,16 @@ struct LoginView: View {
             // ユーザーが Face ID シートを閉じたケース。案内は不要。
             return
         } catch let e as APIError where e.isNetwork {
+            Haptics.error()
             passkeyHint = e.errorDescription
         } catch let e as APIError {
             // サーバ側の検証に失敗 (期限切れ・未登録の credential など)。
+            Haptics.error()
             passkeyHint = "\(e.errorDescription ?? "ログインできませんでした。") パスワードでもログインできます。"
             focused = .password
         } catch {
             // 端末にパスキーが無い・システム側で中断された など。
+            Haptics.error()
             passkeyHint = "この端末でパスキーを使えませんでした。下のパスワードでログインしてから、マイページ > パスキー・パスワードで登録できます。"
             focused = .password
         }

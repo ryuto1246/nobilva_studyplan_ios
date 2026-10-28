@@ -17,5 +17,8 @@ extension View {
         } message: {
             Text(message.wrappedValue ?? "")
         }
+        .onChange(of: message.wrappedValue != nil) { _, shown in
+            if shown { Haptics.error() }
+        }
     }
 }

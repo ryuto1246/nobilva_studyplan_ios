@@ -93,6 +93,7 @@ struct CollapsibleHeader: View {
 
     var body: some View {
         Button {
+            Haptics.selection()
             withAnimation(.snappy) { isExpanded.toggle() }
         } label: {
             HStack {
