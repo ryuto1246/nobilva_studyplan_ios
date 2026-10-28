@@ -177,7 +177,7 @@ struct TodayView: View {
             )
             if !vm.completedToday.isEmpty {
                 SectionHeader("今日やったこと")
-                StudyItemList(items: vm.completedToday) { item in
+                StudyItemList(items: vm.completedToday, style: .plain) { item in
                     StudyItemRow(item: item, onToggle: { toggle(item) })
                 }
             }
@@ -185,7 +185,7 @@ struct TodayView: View {
                 SectionHeader("明日の予定") {
                     if let d = vm.tomorrowDate { Text(JSTDate.monthDay(d)).foregroundStyle(.secondary) }
                 }
-                StudyItemList(items: vm.tomorrowPreview, dividerInset: 12) { item in
+                StudyItemList(items: vm.tomorrowPreview, style: .plain, dividerInset: 12) { item in
                     StudyItemRow(item: item)
                 }
             }
@@ -220,7 +220,7 @@ struct TodayView: View {
             VStack(alignment: .leading, spacing: 8) {
                 CollapsibleHeader(title: "今日完了したもの (\(done.count)件)", isExpanded: $showCompleted)
                 if showCompleted {
-                    StudyItemList(items: done) { item in
+                    StudyItemList(items: done, style: .plain) { item in
                         StudyItemRow(item: item, onToggle: { toggle(item) })
                     }
                 }
@@ -326,7 +326,7 @@ struct TodayView: View {
         if !open.isEmpty {
             VStack(alignment: .leading, spacing: 10) {
                 SectionHeader("日付が決まっていないタスク")
-                StudyItemList(items: open) { item in
+                StudyItemList(items: open, style: .plain) { item in
                     StudyItemRow(
                         item: item,
                         onToggle: { toggle(item) },
