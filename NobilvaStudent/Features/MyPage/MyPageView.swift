@@ -24,13 +24,6 @@ struct MyPageView: View {
                     // 1 週間の計画をそのまま見せる。日付をタップするとその日の計画を開く。
                     WeekStrip(days: PlanDay.week(from: planDays), selected: nil, fillsWidth: true) { openingDate = $0 }
                         .listRowInsets(EdgeInsets(top: 8, leading: 8, bottom: 8, trailing: 8))
-                    ForEach(PlanDay.week(from: planDays).prefix(2)) { day in
-                        NavigationLink { PlanListView(initialDate: day.date) } label: {
-                            LabeledRow(day.date == JSTDate.todayString() ? "今日" : "明日",
-                                       systemImage: day.date == JSTDate.todayString() ? "sun.max" : "moon",
-                                       value: day.items.isEmpty ? "計画なし" : "\(day.doneCount)/\(day.items.count)件 · 約\(formatMinutes(day.totalMinutes))")
-                        }
-                    }
                     NavigationLink { PlanListView() } label: {
                         LabeledRow("すべての計画", systemImage: "calendar")
                     }
@@ -39,10 +32,18 @@ struct MyPageView: View {
                 }
 
                 Section {
-                    NavigationLink { HistoryView() } label: {
-                        LabeledRow("学習記録", systemImage: "chart.bar.fill",
-                                   value: stats.map { "直近7日 \(formatMinutes($0.totalMinutes))" })
+                    // 学習記録はここでそのまま見られるようにし、日ごとの内訳だけ詳細画面へ。
+                    if let stats {
+                        StudySummaryView(stats: stats)
+                            .padding(.vertical, 8)
+                    } else {
+                        ProgressView().frame(maxWidth: .infinity, minHeight: 120)
                     }
+                    NavigationLink { HistoryView() } label: {
+                        LabeledRow("日ごとの記録を見る", systemImage: "list.bullet")
+                    }
+                } header: {
+                    Text("学習記録")
                 }
 
                 Section("予定") {

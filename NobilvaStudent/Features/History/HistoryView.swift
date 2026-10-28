@@ -31,30 +31,8 @@ struct HistoryView: View {
     private func content(_ s: StudyStats) -> some View {
         ScrollView {
             VStack(alignment: .leading, spacing: 24) {
-                HStack(alignment: .top, spacing: 0) {
-                    stat("今日", formatMinutes(s.todayMinutes))
-                    Divider().frame(height: 44)
-                    stat("直近7日", formatMinutes(s.totalMinutes))
-                    Divider().frame(height: 44)
-                    stat("1日平均", formatMinutes(s.totalMinutes / 7))
-                }
-                if s.totalMinutes == 0 {
-                    InlineEmptyState(
-                        title: "まだ記録がありません",
-                        message: "今日画面の「取り組む」からタイマーを使うと、ここに記録されます。",
-                        systemImage: "chart.bar"
-                    )
-                } else {
-                    Chart(s.days) { d in
-                        BarMark(x: .value("日付", d.weekday), y: .value("分", d.minutes))
-                            .foregroundStyle(Theme.accent)
-                            .cornerRadius(4)
-                            .accessibilityLabel(d.label)
-                            .accessibilityValue(formatMinutes(d.minutes))
-                    }
-                    .chartYAxis { AxisMarks(position: .leading) }
-                    .frame(height: 200)
-
+                StudySummaryView(stats: s, chartHeight: 200)
+                if s.totalMinutes > 0 {
                     VStack(alignment: .leading, spacing: 0) {
                         Text("日ごと")
                             .font(.subheadline.weight(.semibold))
@@ -79,15 +57,6 @@ struct HistoryView: View {
         }
     }
 
-    private func stat(_ label: String, _ value: String) -> some View {
-        VStack(spacing: 4) {
-            Text(label).font(.caption).foregroundStyle(.secondary)
-            Text(value).font(.title3.bold().monospacedDigit()).foregroundStyle(Theme.accent)
-        }
-        .frame(maxWidth: .infinity)
-        .accessibilityElement(children: .combine)
-    }
-
     private func load() async {
         isLoading = true
         defer { isLoading = false }
@@ -98,6 +67,51 @@ struct HistoryView: View {
                 toast.showError("最新の記録を読み込めませんでした")
             }
         }
+    }
+}
+
+/// 学習時間の要約: 今日 / 直近7日 / 1日平均 の数字と、曜日ごとのグラフ。
+/// 学習記録の画面とマイページで共有する。
+struct StudySummaryView: View {
+    let stats: StudyStats
+    var chartHeight: CGFloat = 140
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 16) {
+            HStack(alignment: .top, spacing: 0) {
+                stat("今日", formatMinutes(stats.todayMinutes))
+                Divider().frame(height: 44)
+                stat("直近7日", formatMinutes(stats.totalMinutes))
+                Divider().frame(height: 44)
+                stat("1日平均", formatMinutes(stats.totalMinutes / 7))
+            }
+            if stats.totalMinutes == 0 {
+                InlineEmptyState(
+                    title: "まだ記録がありません",
+                    message: "今日画面の「取り組む」からタイマーを使うと、ここに記録されます。",
+                    systemImage: "chart.bar"
+                )
+            } else {
+                Chart(stats.days) { d in
+                    BarMark(x: .value("日付", d.weekday), y: .value("分", d.minutes))
+                        .foregroundStyle(Theme.accent)
+                        .cornerRadius(4)
+                        .accessibilityLabel(d.label)
+                        .accessibilityValue(formatMinutes(d.minutes))
+                }
+                .chartYAxis { AxisMarks(position: .leading) }
+                .frame(height: chartHeight)
+            }
+        }
+    }
+
+    private func stat(_ label: String, _ value: String) -> some View {
+        VStack(spacing: 4) {
+            Text(label).font(.caption).foregroundStyle(.secondary)
+            Text(value).font(.title3.bold().monospacedDigit()).foregroundStyle(Theme.accent)
+        }
+        .frame(maxWidth: .infinity)
+        .accessibilityElement(children: .combine)
     }
 }
 
