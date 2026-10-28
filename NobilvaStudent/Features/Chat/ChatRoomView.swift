@@ -317,34 +317,53 @@ private struct DaySeparator: View {
     }
 }
 
-/// 管理者 (運営) からのお知らせ。先生の発言と区別するため吹き出しにせず中央に置く。
+/// 管理者 (運営) からのお知らせ。先生の発言と区別するため、吹き出しではなく
+/// 横幅いっぱいのカードにし、送り主と時刻を見出しに置く。
 private struct NoticeMessage: View {
     let message: ChatMessage
 
     var body: some View {
-        VStack(spacing: 4) {
-            Label("お知らせ", systemImage: "megaphone.fill")
-                .font(.caption.weight(.semibold))
-                .foregroundStyle(.secondary)
+        VStack(alignment: .leading, spacing: 10) {
+            HStack(spacing: 10) {
+                Image(systemName: "megaphone.fill")
+                    .font(.subheadline.weight(.semibold))
+                    .foregroundStyle(.white)
+                    .frame(width: 32, height: 32)
+                    .background(Theme.accent, in: Circle())
+                    .accessibilityHidden(true)
+                VStack(alignment: .leading, spacing: 1) {
+                    Text("お知らせ")
+                        .font(.subheadline.weight(.bold))
+                    Text("Nobilva 運営から")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
+                Spacer(minLength: 8)
+                if let ts = JSTDate.parseTimestamp(message.createdAt) {
+                    Text(JSTDate.time.string(from: ts))
+                        .font(.footnote)
+                        .foregroundStyle(.secondary)
+                }
+            }
             if let body = message.body, !body.isEmpty {
                 Text(body)
-                    .font(.footnote)
-                    .multilineTextAlignment(.center)
+                    .font(.body)
+                    .fixedSize(horizontal: false, vertical: true)
                     .textSelection(.enabled)
             }
-            if let ts = JSTDate.parseTimestamp(message.createdAt) {
-                Text(JSTDate.time.string(from: ts))
-                    .font(.caption2)
-                    .foregroundStyle(.tertiary)
+        }
+        .padding(14)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .padding(.leading, 4)
+        .background(alignment: .leading) {
+            // 左端のアクセント線で、会話の吹き出しとは別物だと一目で分かるようにする。
+            ZStack(alignment: .leading) {
+                Theme.accent.opacity(0.08)
+                Theme.accent.frame(width: 4)
             }
         }
-        .padding(12)
-        .frame(maxWidth: 320)
-        .background(Theme.secondaryBackground.opacity(0.6), in: RoundedRectangle(cornerRadius: 12, style: .continuous))
-        .overlay(RoundedRectangle(cornerRadius: 12, style: .continuous)
-            .strokeBorder(Theme.separator.opacity(0.4), style: StrokeStyle(lineWidth: 0.5, dash: [3])))
-        .frame(maxWidth: .infinity)
-        .padding(.vertical, 4)
+        .clipShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
+        .padding(.vertical, 6)
         .accessibilityElement(children: .combine)
     }
 }
@@ -366,8 +385,8 @@ private struct MessageBubble: View {
     private var timeText: some View {
         if let ts = JSTDate.parseTimestamp(message.createdAt) {
             Text(JSTDate.time.string(from: ts))
-                .font(.caption2)
-                .foregroundStyle(.tertiary)
+                .font(.caption)
+                .foregroundStyle(.secondary)
         }
     }
 
