@@ -1,5 +1,6 @@
 import Foundation
 import SwiftUI
+import os
 
 /// 認証状態を保持する ObservableObject。
 /// - `accessToken` はメモリのみ、`refreshToken` は Keychain 永続化。
@@ -20,10 +21,13 @@ final class AuthStore: ObservableObject, TokenProviding {
     @Published private(set) var currentRole: String?
 
     // MARK: - Tokens
-    // 複数タスクから同時に読まれる可能性があるが、set は refreshの完了時のみ。
-    // 一時的な同時読み書きはアプリの動作に影響しないので nonisolated(unsafe) で許容。
-    nonisolated(unsafe) private var _accessToken: String?
-    nonisolated var accessToken: String? { _accessToken }
+    // APIClient (別 actor) から読まれ、MainActor で書かれる。String の同時読み書きは
+    // クラッシュしうるので lock で守る。
+    private nonisolated let accessTokenLock = OSAllocatedUnfairLock<String?>(initialState: nil)
+    nonisolated var accessToken: String? { accessTokenLock.withLock { $0 } }
+    private nonisolated func setAccessToken(_ token: String?) {
+        accessTokenLock.withLock { $0 = token }
+    }
 
     let api: APIClient
 
@@ -61,7 +65,7 @@ final class AuthStore: ObservableObject, TokenProviding {
             if (error as? APIError)?.isTerminalAuth == true {
                 Log.auth.error("bootstrap refresh rejected, clearing keychain: \(String(describing: error))")
                 Keychain.delete(refreshKey)
-                _accessToken = nil
+                setAccessToken(nil)
                 phase = .unauthenticated
                 return
             }
@@ -76,7 +80,7 @@ final class AuthStore: ObservableObject, TokenProviding {
             if (error as? APIError)?.isTerminalAuth == true {
                 Log.auth.error("bootstrap refresh retry rejected, clearing keychain: \(String(describing: error))")
                 Keychain.delete(refreshKey)
-                _accessToken = nil
+                setAccessToken(nil)
             } else {
                 Log.auth.warning("bootstrap refresh retry transient, keeping keychain: \(String(describing: error))")
             }
@@ -428,7 +432,7 @@ final class AuthStore: ObservableObject, TokenProviding {
             authorized: false
         )
         await MainActor.run { [self] in
-            self._accessToken = resp.session.accessToken
+            self.setAccessToken(resp.session.accessToken)
             Keychain.set(resp.session.refreshToken, key: refreshKey)
             self.currentUser = resp.session.user
         }
@@ -453,12 +457,13 @@ final class AuthStore: ObservableObject, TokenProviding {
 
     nonisolated func clearForLogout() async {
         await MainActor.run { [self] in
-            _accessToken = nil
+            setAccessToken(nil)
             Keychain.delete(refreshKey)
             currentUser = nil
             currentRole = nil
             // 別ユーザーが同じ端末でログインする可能性を考慮し、キャッシュも全消去。
             DiskCache.clearAll()
+            PushService.shared.stopReceivingAfterSignOut()
             phase = .unauthenticated
             // タイマー・未読ポーリングなど、ユーザーに紐づく端末内の状態も片付けさせる。
             NotificationCenter.default.post(name: .userDidSignOut, object: nil)
@@ -468,7 +473,7 @@ final class AuthStore: ObservableObject, TokenProviding {
     // MARK: - Private
 
     private func adopt(session: MobileSession, role: String?) {
-        _accessToken = session.accessToken
+        setAccessToken(session.accessToken)
         Keychain.set(session.refreshToken, key: refreshKey)
         currentUser = session.user
         currentRole = role
