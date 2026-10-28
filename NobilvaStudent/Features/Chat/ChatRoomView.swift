@@ -24,6 +24,9 @@ struct ChatRoomView: View {
     @State private var viewingImage: ViewingImage?
     /// 最後のメッセージが画面内にあるか (新着で自動スクロールしてよいか)。
     @State private var isAtBottom = true
+    /// 送信が届いた回数。取得の途中で送信が届いたら、その取得結果は使わない
+    /// (送信前の一覧で上書きして、自分のメッセージが一瞬消えるのを防ぐ)。
+    @State private var deliveredCount = 0
     @FocusState private var isInputFocused: Bool
 
     private static let maxLength = 2000
@@ -40,6 +43,8 @@ struct ChatRoomView: View {
         let body: String?
         let imageData: Data?
         var failed = false
+        /// サーバには届いたが、まだ取得した一覧に入っていない。
+        var delivered = false
     }
 
     var body: some View {
@@ -212,7 +217,12 @@ struct ChatRoomView: View {
                 threadId = try await repo().createOrGetThread(teacherId: teacherId).threadId
             }
             guard let threadId else { return }
+            let generation = deliveredCount
             let fetched = try await repo().messages(threadId: threadId)
+            // 取得中に送信が届いていたら、この一覧は古い (送ったものが入っていない) ので捨てる。
+            // 送信後の取り直しが続けて走るので、そちらで反映される。
+            guard generation == deliveredCount else { return }
+            pending.removeAll(where: \.delivered)
             let hadNew = fetched.last?.id != messages.last?.id
             // 開いている間に相手から届いたら、軽く知らせる (初回読み込みと自分の送信は除く)。
             if !initial, hadNew, let last = fetched.last, last.senderId != auth.currentUser?.id {
@@ -261,8 +271,10 @@ struct ChatRoomView: View {
             } else if let body = p.body {
                 _ = try await repo().send(threadId: threadId, body: body)
             }
-            messages = (try? await repo().messages(threadId: threadId)) ?? messages
-            pending.removeAll { $0.id == p.id }
+            // 一覧を取り直せるまでは、届いたものとして仮表示を残す。
+            if let idx = pending.firstIndex(where: { $0.id == p.id }) { pending[idx].delivered = true }
+            deliveredCount += 1
+            await load()
         } catch {
             if let idx = pending.firstIndex(where: { $0.id == p.id }) { pending[idx].failed = true }
             Haptics.error()
@@ -415,7 +427,7 @@ private struct PendingBubble: View {
                         .frame(width: 44, height: 44)
                 }
                 .accessibilityLabel("送信できませんでした")
-            } else {
+            } else if !message.delivered {
                 ProgressView().controlSize(.small)
             }
             Group {
@@ -428,7 +440,7 @@ private struct PendingBubble: View {
                     Text(body).bubble(isMine: true)
                 }
             }
-            .opacity(message.failed ? 1 : 0.6)
+            .opacity(message.failed || message.delivered ? 1 : 0.6)
         }
     }
 }
