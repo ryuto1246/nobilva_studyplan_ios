@@ -9,6 +9,7 @@ import SwiftUI
 struct PlanListView: View {
     @EnvironmentObject var auth: AuthStore
     @EnvironmentObject var router: AppRouter
+    @EnvironmentObject var tour: TourController
 
     /// buildDayEntries と同じ shape。過去→未来の順に並べ、今日が無い場合は
     /// placeholder を差し込んで「今日はまだ計画がありません」を出す。
@@ -62,6 +63,7 @@ struct PlanListView: View {
                     } label: {
                         Image(systemName: "plus")
                     }
+                    .tourTarget(.planAddButton)
                 }
             }
             .task {
@@ -77,6 +79,10 @@ struct PlanListView: View {
                 withAnimation { proxy.scrollTo("today", anchor: .top) }
             }
             .refreshable { await load() }
+            .onChange(of: tour.current?.target) { _, target in
+                guard target == .planToday else { return }
+                withAnimation { proxy.scrollTo("today", anchor: .top) }
+            }
             .sheet(isPresented: $showAddTask) {
                 TaskFormView(existing: nil) { Task { await load() } }
                     .environmentObject(auth)
@@ -152,6 +158,7 @@ struct PlanListView: View {
             VStack(spacing: 12) {
                 ForEach(dayEntries, id: \.self) { entry in
                     dayCard(entry)
+                        .tourTarget(isToday(entry) ? .planToday : nil)
                         .id(isToday(entry) ? "today" : entry.sortKey)
                 }
             }

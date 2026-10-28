@@ -3,6 +3,7 @@ import SwiftUI
 struct DashboardView: View {
     @EnvironmentObject var auth: AuthStore
     @EnvironmentObject var router: AppRouter
+    @EnvironmentObject var tour: TourController
     @StateObject private var vm = DashboardViewModel()
     @State private var showBusyEditor = false
     /// エラー時にダイアログ表示する (画面内のカードでは出さない、統一方針)。
@@ -66,19 +67,31 @@ struct DashboardView: View {
 
     @ViewBuilder
     private func loadedView(_ s: DashboardSummary) -> some View {
-        ScrollView {
-            VStack(alignment: .leading, spacing: 20) {
-                heroSection(s)
-                if let m = s.upcomingMeeting, !m.isPast {
-                    upcomingMeetingCard(m)
+        ScrollViewReader { proxy in
+            ScrollView {
+                VStack(alignment: .leading, spacing: 20) {
+                    heroSection(s)
+                    if let m = s.upcomingMeeting, !m.isPast {
+                        upcomingMeetingCard(m)
+                    }
+                    overdueSection(s)
+                    todayOrTomorrowSection(s)
+                        .tourTarget(.homeToday)
+                        .id(TourTarget.homeToday)
+                    busySlotsSection(s)
+                        .tourTarget(.homeBusySlots)
+                        .id(TourTarget.homeBusySlots)
                 }
-                overdueSection(s)
-                todayOrTomorrowSection(s)
-                busySlotsSection(s)
+                .padding(.horizontal, 20)
+                .padding(.top, 8)
+                .padding(.bottom, 20)
             }
-            .padding(.horizontal, 20)
-            .padding(.top, 8)
-            .padding(.bottom, 20)
+            // ツアーが画面外の項目を指したらそこまでスクロールする。
+            .onChange(of: tour.current?.target) { _, target in
+                guard let target, tour.current?.tab == .home else { return }
+                let id = target == .homeTodoRow ? TourTarget.homeToday : target
+                withAnimation { proxy.scrollTo(id, anchor: .center) }
+            }
         }
     }
 
@@ -281,6 +294,7 @@ struct DashboardView: View {
                             onConsult: { consulting = ConsultingRequest(card: .fromPlanItem(
                                 title: item.title, subject: item.subject, durationMinutes: item.durationMinutes)) }
                         )
+                        .tourTarget(i == 0 ? .homeTodoRow : nil)
                         if i != sorted.count - 1 { Divider() }
                     }
                 }

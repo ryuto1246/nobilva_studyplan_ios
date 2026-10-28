@@ -20,8 +20,11 @@ struct HistoryView: View {
         NavigationStack {
             ScrollView {
                 VStack(spacing: 16) {
-                    summaryRow
-                    chartCard
+                    VStack(spacing: 16) {
+                        summaryRow
+                        chartCard
+                    }
+                    .tourTarget(.historySummary)
                     if let msg = errorMessage {
                         Text(msg).font(.footnote).foregroundStyle(.red)
                     }

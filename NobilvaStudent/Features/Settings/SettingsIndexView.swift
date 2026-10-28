@@ -3,6 +3,7 @@ import UIKit
 
 struct SettingsIndexView: View {
     @EnvironmentObject var auth: AuthStore
+    @EnvironmentObject var tour: TourController
     @State private var showLogoutConfirm = false
 
     static let appVersion: String = {
@@ -14,72 +15,82 @@ struct SettingsIndexView: View {
 
     var body: some View {
         NavigationStack {
-            List {
-                Section("プロフィール") {
-                    NavigationLink { AccountView().environmentObject(auth) } label: {
-                        Label("アカウント", systemImage: "person.crop.circle")
-                    }
-                    NavigationLink { StudySettingsView().environmentObject(auth) } label: {
-                        Label("学習設定", systemImage: "graduationcap")
-                    }
-                    NavigationLink { PomodoroSettingsView().environmentObject(auth) } label: {
-                        Label("ポモドーロ", systemImage: "timer")
-                    }
-                }
-                Section("通知") {
-                    NavigationLink { NotificationsSettingsView().environmentObject(auth) } label: {
-                        Label("通知設定", systemImage: "bell")
-                    }
-                }
-                Section("セキュリティ") {
-                    NavigationLink { SecuritySettingsView().environmentObject(auth) } label: {
-                        Label("パスキー / パスワード", systemImage: "lock.shield")
-                    }
-                }
-                Section("ヘルプ") {
-                    NavigationLink { GuideView() } label: {
-                        Label("使い方", systemImage: "questionmark.circle")
-                    }
-                }
-                Section("利用規約・プライバシー") {
-                    if let url = URL(string: "https://nectere.jp/ja/legal/nobilva/terms-of-service") {
-                        Link(destination: url) {
-                            Label("利用規約", systemImage: "doc.text")
+            ScrollViewReader { proxy in
+                List {
+                    Section("プロフィール") {
+                        NavigationLink { AccountView().environmentObject(auth) } label: {
+                            Label("アカウント", systemImage: "person.crop.circle")
+                        }
+                        NavigationLink { StudySettingsView().environmentObject(auth) } label: {
+                            Label("学習設定", systemImage: "graduationcap")
+                        }
+                        NavigationLink { PomodoroSettingsView().environmentObject(auth) } label: {
+                            Label("ポモドーロ", systemImage: "timer")
                         }
                     }
-                    if let url = URL(string: "https://nectere.jp/ja/legal/privacy-policy") {
-                        Link(destination: url) {
-                            Label("プライバシーポリシー", systemImage: "hand.raised")
+                    Section("通知") {
+                        NavigationLink { NotificationsSettingsView().environmentObject(auth) } label: {
+                            Label("通知設定", systemImage: "bell")
                         }
                     }
-                    if let url = URL(string: "https://nectere.jp/ja/legal/nobilva/commercial-disclosure") {
-                        Link(destination: url) {
-                            Label("特定商取引法に基づく表記", systemImage: "doc.plaintext")
+                    Section("セキュリティ") {
+                        NavigationLink { SecuritySettingsView().environmentObject(auth) } label: {
+                            Label("パスキー / パスワード", systemImage: "lock.shield")
+                        }
+                    }
+                    Section("ヘルプ") {
+                        Button { tour.start() } label: {
+                            Label("使い方", systemImage: "questionmark.circle")
+                                .foregroundStyle(Color.primary)
+                                .frame(maxWidth: .infinity, alignment: .leading)
+                        }
+                        .tourTarget(.settingsGuide)
+                        .id(TourTarget.settingsGuide)
+                    }
+                    Section("利用規約・プライバシー") {
+                        if let url = URL(string: "https://nectere.jp/ja/legal/nobilva/terms-of-service") {
+                            Link(destination: url) {
+                                Label("利用規約", systemImage: "doc.text")
+                            }
+                        }
+                        if let url = URL(string: "https://nectere.jp/ja/legal/privacy-policy") {
+                            Link(destination: url) {
+                                Label("プライバシーポリシー", systemImage: "hand.raised")
+                            }
+                        }
+                        if let url = URL(string: "https://nectere.jp/ja/legal/nobilva/commercial-disclosure") {
+                            Link(destination: url) {
+                                Label("特定商取引法に基づく表記", systemImage: "doc.plaintext")
+                            }
+                        }
+                    }
+                    Section {
+                        Button(role: .destructive) {
+                            showLogoutConfirm = true
+                        } label: {
+                            Label("ログアウト", systemImage: "rectangle.portrait.and.arrow.right")
+                        }
+                        if let url = URL(string: "https://studyplan.nobilva.jp/settings/account/delete") {
+                            Link(destination: url) {
+                                Label("アカウントを削除する (Web)", systemImage: "trash")
+                                    .foregroundStyle(.red)
+                            }
+                        }
+                    }
+                    Section {
+                        HStack {
+                            Text("バージョン")
+                            Spacer()
+                            Text(Self.appVersion).foregroundStyle(.secondary)
                         }
                     }
                 }
-                Section {
-                    Button(role: .destructive) {
-                        showLogoutConfirm = true
-                    } label: {
-                        Label("ログアウト", systemImage: "rectangle.portrait.and.arrow.right")
-                    }
-                    if let url = URL(string: "https://studyplan.nobilva.jp/settings/account/delete") {
-                        Link(destination: url) {
-                            Label("アカウントを削除する (Web)", systemImage: "trash")
-                                .foregroundStyle(.red)
-                        }
-                    }
-                }
-                Section {
-                    HStack {
-                        Text("バージョン")
-                        Spacer()
-                        Text(Self.appVersion).foregroundStyle(.secondary)
-                    }
+                .navigationTitle("設定")
+                .onChange(of: tour.current?.target) { _, target in
+                    guard target == .settingsGuide else { return }
+                    withAnimation { proxy.scrollTo(TourTarget.settingsGuide, anchor: .center) }
                 }
             }
-            .navigationTitle("設定")
             .confirmationDialog("ログアウトしますか？", isPresented: $showLogoutConfirm, titleVisibility: .visible) {
                 Button("ログアウト", role: .destructive) { Task { await auth.logout() } }
             }
