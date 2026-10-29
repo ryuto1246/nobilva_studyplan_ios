@@ -219,7 +219,8 @@ struct TodayView: View {
     private var nextUpSection: some View {
         if !nextUpItems.isEmpty {
             VStack(alignment: .leading, spacing: 10) {
-                SectionHeader("次にやること")
+                // ツアーの見本は本物のやることと取り違えないよう、見出しで分かるようにする。
+                SectionHeader(nextUpItems.contains(where: TourSample.isSample) ? "次にやること（見本）" : "次にやること")
                 StudyItemList(items: nextUpItems, style: .plain) { item in
                     StudyItemRow(
                         item: item,

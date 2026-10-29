@@ -294,6 +294,7 @@ private struct TourBubble: View {
     let onBack: () -> Void
     let onNext: () -> Void
     let onSkip: () -> Void
+    @Environment(\.colorScheme) private var colorScheme
 
     private var isLast: Bool { index == total - 1 }
 
@@ -329,8 +330,15 @@ private struct TourBubble: View {
         }
         .padding(Theme.cardPadding)
         .frame(maxWidth: 440)
-        .background(Theme.secondaryBackground)
+        // ダークモードでは暗幕と背景色が近く沈んで見えるので、一段明るい面と縁取りで浮かせる。
+        .background(colorScheme == .dark ? Color(UIColor.tertiarySystemGroupedBackground) : Theme.secondaryBackground)
         .clipShape(RoundedRectangle(cornerRadius: Theme.cardCorner, style: .continuous))
+        .overlay {
+            if colorScheme == .dark {
+                RoundedRectangle(cornerRadius: Theme.cardCorner, style: .continuous)
+                    .strokeBorder(.white.opacity(0.25), lineWidth: 1)
+            }
+        }
         .shadow(color: .black.opacity(0.25), radius: 16, y: 6)
         .id(index)
         .transition(.opacity)
