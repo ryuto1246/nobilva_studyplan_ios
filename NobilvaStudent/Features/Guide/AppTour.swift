@@ -19,6 +19,7 @@ enum TourTarget: String, Hashable {
     case todayFocus
     case todayNextUp
     case todayAddButton
+    case todayTimerButton
     case chatFirstContact
     case myPageWeek
     case myPageStats
@@ -46,6 +47,9 @@ struct TourStep {
         TourStep(tab: .today, target: .todayAddButton,
                  title: "タスクを追加",
                  message: "宿題や自分で進めたいことは、ここからタスクとして登録できます。"),
+        TourStep(tab: .today, target: .todayTimerButton,
+                 title: "タイマー",
+                 message: "計画にないことを勉強するときや、計画を終えたあとに自習するときは、ここからタイマーを開いて時間を記録できます。"),
         TourStep(tab: .chat, target: .chatFirstContact,
                  title: "チャット",
                  message: "担当の先生ごとにカードが並びます。開くとチャットができ、その先生との次の面談も確認できます。"),

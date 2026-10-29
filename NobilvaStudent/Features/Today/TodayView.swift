@@ -29,6 +29,14 @@ struct TodayView: View {
                 .background(Theme.groupedBackground.ignoresSafeArea())
                 .navigationTitle("今日")
                 .toolbar {
+                    // 計画にないことを勉強するときや、計画を終えたあとに自習するときの入口。
+                    ToolbarItem(placement: .topBarLeading) {
+                        Button { router.startTimer(for: nil, timer: timer) } label: {
+                            Image(systemName: "timer")
+                        }
+                        .accessibilityLabel("タイマー")
+                        .tourTarget(.todayTimerButton)
+                    }
                     ToolbarItem(placement: .topBarTrailing) {
                         // Label だとツールバーが UIKit の部品に置き換えて描画し、ツアーが
                         // 位置を取れないので Image + accessibilityLabel にしている。
@@ -162,6 +170,7 @@ struct TodayView: View {
                 SecondaryButton("チャットを開く", systemImage: "bubble.left.and.bubble.right") {
                     router.selectedTab = .chat
                 }
+                freeStudyButton
             }
         }
     }
@@ -177,6 +186,7 @@ struct TodayView: View {
                 systemImage: "checkmark.seal.fill"
             )
             .background(Theme.secondaryBackground, in: RoundedRectangle(cornerRadius: Theme.cardCorner, style: .continuous))
+            freeStudyButton
             if !vm.completedToday.isEmpty {
                 SectionHeader("今日やったこと")
                 StudyItemList(items: vm.completedToday, style: .plain) { item in
@@ -191,6 +201,17 @@ struct TodayView: View {
                     StudyItemRow(item: item)
                 }
             }
+        }
+    }
+
+    /// やることが無いときに、計画に縛られずタイマーで勉強を始める。計測中は計測バーがあるので出さない。
+    @ViewBuilder
+    private var freeStudyButton: some View {
+        if !timer.hasSession {
+            SecondaryButton("タイマーで自習する", systemImage: "timer") {
+                router.startTimer(for: nil, timer: timer)
+            }
+            .frame(maxWidth: .infinity)
         }
     }
 
