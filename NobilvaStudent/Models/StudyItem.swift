@@ -19,6 +19,8 @@ struct StudyItem: Identifiable, Hashable {
     let overdueDays: Int
     let rationale: String?
     let sortOrder: Int
+    /// 計画アイテムの元になったタスク。タスク自身では nil。
+    let taskId: String?
     /// タスクに設定された「やりたい時間帯」。計画アイテムは startTime から決まるので nil。
     let preferredTimeOfDay: TimeOfDay?
 
@@ -32,10 +34,12 @@ struct StudyItem: Identifiable, Hashable {
         self.date = date
         startTime = p.startTime
         dueDate = nil
-        overdueDays = 0
+        // 前日までの計画は「N日遅れ」を出す (今日・先の日は 0)。
+        overdueDays = date.map(JSTDate.daysOverdue) ?? 0
         // Web と同じく AI の「優先度」系の理由は出さない。
         rationale = (p.rationale?.contains("優先度") ?? true) ? nil : p.rationale
         sortOrder = p.sortOrder
+        taskId = p.taskId
         preferredTimeOfDay = nil
     }
 
@@ -52,6 +56,7 @@ struct StudyItem: Identifiable, Hashable {
         overdueDays = [t.dueDate, t.scheduledDate].compactMap { $0 }.map(JSTDate.daysOverdue).max() ?? 0
         rationale = nil
         sortOrder = 0
+        taskId = nil
         preferredTimeOfDay = t.preferredTimeOfDay
     }
 
@@ -59,7 +64,7 @@ struct StudyItem: Identifiable, Hashable {
         id = o.id; kind = o.kind; title = o.title; subject = o.subject; minutes = o.minutes
         self.isDone = isDone
         date = o.date; startTime = o.startTime; dueDate = o.dueDate; overdueDays = o.overdueDays
-        rationale = o.rationale; sortOrder = o.sortOrder; preferredTimeOfDay = o.preferredTimeOfDay
+        rationale = o.rationale; sortOrder = o.sortOrder; taskId = o.taskId; preferredTimeOfDay = o.preferredTimeOfDay
     }
 
     /// 楽観的更新用。完了状態だけ差し替えたコピー。

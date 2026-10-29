@@ -139,12 +139,12 @@ struct TodayView: View {
         .accessibilityElement(children: .combine)
     }
 
-    /// 分母は今日の計画だけ。期限切れのタスクは別に数える (混ぜると数が合わなくなる)。
+    /// 分母は今日の計画だけ。期限切れのタスクや前日までの残りは別に数える (混ぜると数が合わなくなる)。
     private var progressText: String {
         var parts = [vm.todayDoneCount == vm.todayPlanCount
                      ? "今日の計画 \(vm.todayPlanCount)件 すべて完了"
                      : "今日の計画 \(vm.todayDoneCount)/\(vm.todayPlanCount)件 完了"]
-        if vm.overdueOpenCount > 0 { parts.append("遅れているタスク \(vm.overdueOpenCount)件") }
+        if vm.overdueOpenCount > 0 { parts.append("遅れている分 \(vm.overdueOpenCount)件") }
         return parts.joined(separator: " · ")
     }
 
