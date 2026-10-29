@@ -197,6 +197,7 @@ private struct TourTargetModifier: ViewModifier {
 struct TourOverlay: View {
     @ObservedObject var tour: TourController
     @ObservedObject private var geometry: TourGeometry
+    @Environment(\.colorScheme) private var colorScheme
 
     init(tour: TourController) {
         self.tour = tour
@@ -240,8 +241,9 @@ struct TourOverlay: View {
     }
 
     private func dimLayer(hole: CGRect?) -> some View {
+        // ダークモードは元の画面がほぼ黒なので、同じ濃さだと対象以外がほとんど暗くならない。
         Rectangle()
-            .fill(.black.opacity(0.6))
+            .fill(.black.opacity(colorScheme == .dark ? 0.8 : 0.6))
             .mask {
                 Rectangle()
                     .overlay {
