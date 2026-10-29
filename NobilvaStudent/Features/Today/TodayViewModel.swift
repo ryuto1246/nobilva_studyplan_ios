@@ -44,14 +44,14 @@ final class TodayViewModel: ObservableObject {
     }
 
     /// 前日までにやり残した計画。直近の分だけ出す (計画の立て直しで残った古い項目が
-    /// 溜まり続けないように)。期限切れタスクとして上に出ているもの・今日の計画に
-    /// 入り直したものは重ねて出さない。完了の判定はサーバーの状態で行い、
+    /// 溜まり続けないように)。期限切れタスクとして上に出ているものは重ねて出さない。
+    /// 同じタスクの今日の分は別に数える (「3/20問」のように 1 つのタスクを日ごとに分けて
+    /// 進めるため、昨日の分と今日の分は別のやること)。完了の判定はサーバーの状態で行い、
     /// 完了にした直後だけ「今日完了したもの」に残す (期限切れタスクと同じ)。
     private static let pastPlanLookbackDays = 7
 
     private var pastPlanItems: [StudyItem] {
         let from = JSTDate.todayString(offsetDays: -Self.pastPlanLookbackDays)
-        let todayTaskIds = Set((summary?.today?.plan?.items ?? []).compactMap(\.taskId))
         let overdueTaskIds = Set((summary?.overdueTasks ?? []).map(\.id))
         return pastPlanDays
             .filter { $0.date >= from && $0.date < today }
@@ -59,7 +59,7 @@ final class TodayViewModel: ObservableObject {
             .filter { !$0.isDone }
             .filter { item in
                 guard let taskId = item.taskId else { return true }
-                return !todayTaskIds.contains(taskId) && !overdueTaskIds.contains(taskId)
+                return !overdueTaskIds.contains(taskId)
             }
             .map(apply)
     }

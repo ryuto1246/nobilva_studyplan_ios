@@ -82,8 +82,9 @@ struct StudyItem: Identifiable, Hashable {
     }
 
     /// 「（20問）」のような分量表記がタイトルにあればそれ、無ければ所要時間。
+    /// 「（追加）」のように数字を含まない括弧は分量ではないので使わない。
     var amountLabel: String {
-        if let range = title.range(of: #"（([^）]+)）"#, options: .regularExpression) {
+        if let range = title.range(of: #"（[^）]*[0-9０-９][^）]*）"#, options: .regularExpression) {
             return String(title[range].dropFirst().dropLast())
         }
         return formatMinutes(minutes)

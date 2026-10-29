@@ -9,7 +9,8 @@ struct TimerView: View {
     @EnvironmentObject var toast: ToastCenter
     @Environment(\.dismiss) var dismiss
 
-    @State private var todayItems: [StudyItem] = []
+    /// 選べる「やること」は今日画面と同じもの (期限切れ・前日までの残り・今日の未完了)。
+    @StateObject private var today = TodayViewModel()
     @State private var showManualSheet = false
     @State private var showDiscardConfirm = false
 
@@ -40,7 +41,11 @@ struct TimerView: View {
                     }
                 }
             }
-            .task { await loadPrefs(); await loadTodayItems() }
+            .task { await loadPrefs() }
+            .task {
+                today.inject(api: auth.api)
+                await today.loadIfNeeded()
+            }
             // 計測中にこの画面を開いている間だけ、画面を自動で消さない。
             .onAppear { UIApplication.shared.isIdleTimerDisabled = timer.isRunning }
             .onChange(of: timer.isRunning) { _, running in UIApplication.shared.isIdleTimerDisabled = running }
@@ -49,7 +54,8 @@ struct TimerView: View {
             // シートの上でもトーストが見えるように (アプリのルートの表示はシートの下に隠れる)。
             .toastHost(toast)
             .sheet(isPresented: $showManualSheet) {
-                ManualRecordSheet(todayItems: todayItems, initialPlanItemId: timer.snapshot.item?.planItemId) { minutes in
+                // 記録 API は計画アイテムにしか紐付けられないので、タスクは選択肢に出さない。
+                ManualRecordSheet(todayItems: today.actionable.filter { $0.kind == .planItem }, initialPlanItemId: timer.snapshot.item?.planItemId) { minutes in
                     toast.show("\(formatMinutes(minutes))の学習を記録しました")
                     dismiss()
                 }
@@ -60,7 +66,7 @@ struct TimerView: View {
 
     // MARK: - Sections
 
-    /// 何に取り組むか。計測中は固定表示、計測前は今日の計画から選べる。
+    /// 何に取り組むか。計測中は固定表示、計測前は今日のやることから選べる。
     @ViewBuilder
     private var targetSection: some View {
         if timer.hasSession {
@@ -75,9 +81,9 @@ struct TimerView: View {
         } else {
             Menu {
                 Button("自由学習 (選ばない)") { timer.select(nil) }
-                if !todayItems.isEmpty {
-                    Section("今日の計画") {
-                        ForEach(todayItems) { item in
+                if !today.actionable.isEmpty {
+                    Section("やること") {
+                        ForEach(today.actionable) { item in
                             Button(item.title) { timer.select(item) }
                         }
                     }
@@ -202,13 +208,6 @@ struct TimerView: View {
                                  longBreak: p.pomodoroLongBreakMinutes)
     }
 
-    private func loadTodayItems() async {
-        guard let today = try? await TimerRepository(api: auth.api).todayPlan() else { return }
-        todayItems = today.items
-            .map { StudyItem(planItem: $0, date: JSTDate.todayString()) }
-            .filter { !$0.isDone }
-            .sorted(by: StudyItem.byTimeOfDay)
-    }
 }
 
 /// 手動記録シート。送信が成功してから閉じる。
