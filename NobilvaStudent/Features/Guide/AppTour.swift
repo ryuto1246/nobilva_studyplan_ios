@@ -131,16 +131,20 @@ final class TourController: ObservableObject {
 /// 別タブに隠れた画面は frame を消さずに「非表示」とだけ記録する。
 /// 再表示されても位置が同じなら onGeometryChange は呼ばれないため、
 /// 消してしまうとタブを戻ったときに対象を指せなくなる。
+///
+/// 表示中かどうかは、同じ目印を持つビューの数で数える。読み込みで見本 → 本物のように
+/// ビューが入れ替わると、新しい方の onAppear が古い方の onDisappear より先に
+/// 呼ばれることがあり、真偽値だと最後の「非表示」で上書きされてくり抜きが消えるため。
 @MainActor
 final class TourGeometry: ObservableObject {
     private var frames: [TourTarget: CGRect] = [:]
-    private var hidden: Set<TourTarget> = []
+    private var visibleCount: [TourTarget: Int] = [:]
     var isPublishing = false {
         didSet { if isPublishing { objectWillChange.send() } }
     }
 
     func frame(of target: TourTarget) -> CGRect? {
-        hidden.contains(target) ? nil : frames[target]
+        (visibleCount[target] ?? 0) > 0 ? frames[target] : nil
     }
 
     func set(_ target: TourTarget, _ frame: CGRect) {
@@ -150,9 +154,10 @@ final class TourGeometry: ObservableObject {
     }
 
     func setVisible(_ target: TourTarget, _ visible: Bool) {
-        guard hidden.contains(target) == visible else { return }
-        if isPublishing { objectWillChange.send() }
-        if visible { hidden.remove(target) } else { hidden.insert(target) }
+        let old = visibleCount[target] ?? 0
+        let new = max(0, old + (visible ? 1 : -1))
+        visibleCount[target] = new
+        if isPublishing, (old > 0) != (new > 0) { objectWillChange.send() }
     }
 }
 
