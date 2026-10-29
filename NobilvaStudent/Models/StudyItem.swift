@@ -19,6 +19,8 @@ struct StudyItem: Identifiable, Hashable {
     let overdueDays: Int
     let rationale: String?
     let sortOrder: Int
+    /// タスクに設定された「やりたい時間帯」。計画アイテムは startTime から決まるので nil。
+    let preferredTimeOfDay: TimeOfDay?
 
     init(planItem p: PlanItem, date: String?) {
         id = p.id
@@ -34,6 +36,7 @@ struct StudyItem: Identifiable, Hashable {
         // Web と同じく AI の「優先度」系の理由は出さない。
         rationale = (p.rationale?.contains("優先度") ?? true) ? nil : p.rationale
         sortOrder = p.sortOrder
+        preferredTimeOfDay = nil
     }
 
     init(task t: StudentTask) {
@@ -49,13 +52,14 @@ struct StudyItem: Identifiable, Hashable {
         overdueDays = [t.dueDate, t.scheduledDate].compactMap { $0 }.map(JSTDate.daysOverdue).max() ?? 0
         rationale = nil
         sortOrder = 0
+        preferredTimeOfDay = t.preferredTimeOfDay
     }
 
     private init(copying o: StudyItem, isDone: Bool) {
         id = o.id; kind = o.kind; title = o.title; subject = o.subject; minutes = o.minutes
         self.isDone = isDone
         date = o.date; startTime = o.startTime; dueDate = o.dueDate; overdueDays = o.overdueDays
-        rationale = o.rationale; sortOrder = o.sortOrder
+        rationale = o.rationale; sortOrder = o.sortOrder; preferredTimeOfDay = o.preferredTimeOfDay
     }
 
     /// 楽観的更新用。完了状態だけ差し替えたコピー。
@@ -80,9 +84,17 @@ struct StudyItem: Identifiable, Hashable {
         return formatMinutes(minutes)
     }
 
-    /// 行の 2 行目のうち科目以外 (分量・期限)。科目は色付きバッジで別に出す。
+    /// 行に出す時間帯。計画アイテムは開始時刻から、タスクは設定されていればその時間帯。
+    var timeOfDayLabel: String? {
+        switch kind {
+        case .planItem: return timeOfDay.label
+        case .task: return preferredTimeOfDay?.label
+        }
+    }
+
+    /// 行の 2 行目のうち科目以外 (時間帯・分量・期限)。科目は色付きバッジで別に出す。
     var detailText: String {
-        var parts: [String] = [amountLabel]
+        var parts: [String] = [timeOfDayLabel, amountLabel].compactMap { $0 }
         if let dueDate, overdueDays == 0 { parts.append("期限 \(JSTDate.monthDay(dueDate))") }
         return parts.joined(separator: " · ")
     }
