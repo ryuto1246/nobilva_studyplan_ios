@@ -13,6 +13,8 @@ final class TodayViewModel: ObservableObject {
     @Published private(set) var loadState: LoadState = .loading
     @Published private(set) var summary: DashboardSummary?
     @Published private(set) var unscheduledTasks: [StudentTask] = []
+    /// 前日までの計画 (dashboard/summary には含まれないので計画一覧の API から取る)。
+    @Published private(set) var pastPlanDays: [PlanDay] = []
     /// 今日すでに時間を記録した計画アイテム (完了時に記録を促さない)。
     private(set) var recordedToday: Set<String> = []
     @Published var errorMessage: String?
@@ -41,20 +43,41 @@ final class TodayViewModel: ObservableObject {
         (summary?.overdueTasks ?? []).map { apply(StudyItem(task: $0)) }
     }
 
+    /// 前日までにやり残した計画。直近の分だけ出す (計画の立て直しで残った古い項目が
+    /// 溜まり続けないように)。期限切れタスクとして上に出ているものは重ねて出さない。
+    /// 同じタスクの今日の分は別に数える (「3/20問」のように 1 つのタスクを日ごとに分けて
+    /// 進めるため、昨日の分と今日の分は別のやること)。完了の判定はサーバーの状態で行い、
+    /// 完了にした直後だけ「今日完了したもの」に残す (期限切れタスクと同じ)。
+    private static let pastPlanLookbackDays = 7
+
+    private var pastPlanItems: [StudyItem] {
+        let from = JSTDate.todayString(offsetDays: -Self.pastPlanLookbackDays)
+        let overdueTaskIds = Set((summary?.overdueTasks ?? []).map(\.id))
+        return pastPlanDays
+            .filter { $0.date >= from && $0.date < today }
+            .flatMap(\.items)
+            .filter { !$0.isDone }
+            .filter { item in
+                guard let taskId = item.taskId else { return true }
+                return !overdueTaskIds.contains(taskId)
+            }
+            .map(apply)
+    }
+
     private var todayItems: [StudyItem] {
         (summary?.today?.plan?.items ?? [])
             .map { apply(StudyItem(planItem: $0, date: summary?.today?.date)) }
             .sorted(by: StudyItem.byTimeOfDay)
     }
 
-    /// 期限切れ → 今日の未完了 (朝昼夜順)。Web の TodoNowSection と同じ優先順。
+    /// 期限切れタスク → 前日までの計画の残り (古い日から) → 今日の未完了 (朝昼夜順)。
     var actionable: [StudyItem] {
-        (overdueItems + todayItems).filter { !$0.isDone }
+        (overdueItems + pastPlanItems + todayItems).filter { !$0.isDone }
     }
 
     var focus: StudyItem? { actionable.first }
     var nextUp: [StudyItem] { Array(actionable.dropFirst()) }
-    var completedToday: [StudyItem] { (overdueItems + todayItems).filter(\.isDone) }
+    var completedToday: [StudyItem] { (overdueItems + pastPlanItems + todayItems).filter(\.isDone) }
 
     var todayPlanCount: Int { todayItems.count }
     var todayDoneCount: Int { todayItems.filter(\.isDone).count }
@@ -85,7 +108,7 @@ final class TodayViewModel: ObservableObject {
         unscheduledTasks.first { $0.id == id } ?? summary?.overdueTasks.first { $0.id == id }
     }
 
-    var overdueOpenCount: Int { overdueItems.filter { !$0.isDone }.count }
+    var overdueOpenCount: Int { (overdueItems + pastPlanItems).filter { !$0.isDone }.count }
 
     var upcomingMeeting: Meeting? {
         guard let m = summary?.upcomingMeeting, m.isUpcoming else { return nil }
@@ -103,6 +126,9 @@ final class TodayViewModel: ObservableObject {
         if unscheduledTasks.isEmpty, let cached = TasksRepository.cachedUnscheduled() {
             unscheduledTasks = cached
         }
+        if pastPlanDays.isEmpty, let cached = PlanRepository.cachedPeriods() {
+            pastPlanDays = PlanDay.from(cached)
+        }
         await load()
     }
 
@@ -110,6 +136,7 @@ final class TodayViewModel: ObservableObject {
         guard let api else { return }
         async let summaryResult = Result(asyncCatching: { try await TodayRepository(api: api).fetchSummary() })
         async let tasksResult = Result(asyncCatching: { try await TasksRepository(api: api).listUnscheduled() })
+        async let periodsResult = Result(asyncCatching: { try await PlanRepository(api: api).fetchPeriods() })
 
         switch await summaryResult {
         case .success(let s):
@@ -128,6 +155,10 @@ final class TodayViewModel: ObservableObject {
         }
         if case .success(let tasks) = await tasksResult {
             unscheduledTasks = tasks
+        }
+        // 前日までの残りは補足なので、取れなくても画面は出す。
+        if case .success(let periods) = await periodsResult {
+            pastPlanDays = PlanDay.from(periods)
         }
         if let ids = try? await SessionsRepository(api: api).recordedPlanItemIdsToday() {
             recordedToday = ids

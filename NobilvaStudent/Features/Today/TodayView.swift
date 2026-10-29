@@ -29,6 +29,14 @@ struct TodayView: View {
                 .background(Theme.groupedBackground.ignoresSafeArea())
                 .navigationTitle("今日")
                 .toolbar {
+                    // 計画にないことを勉強するときや、計画を終えたあとに自習するときの入口。
+                    ToolbarItem(placement: .topBarLeading) {
+                        Button { router.startTimer(for: nil, timer: timer) } label: {
+                            Image(systemName: "timer")
+                        }
+                        .accessibilityLabel("タイマー")
+                        .tourTarget(.todayTimerButton)
+                    }
                     ToolbarItem(placement: .topBarTrailing) {
                         // Label だとツールバーが UIKit の部品に置き換えて描画し、ツアーが
                         // 位置を取れないので Image + accessibilityLabel にしている。
@@ -131,12 +139,12 @@ struct TodayView: View {
         .accessibilityElement(children: .combine)
     }
 
-    /// 分母は今日の計画だけ。期限切れのタスクは別に数える (混ぜると数が合わなくなる)。
+    /// 分母は今日の計画だけ。期限切れのタスクや前日までの残りは別に数える (混ぜると数が合わなくなる)。
     private var progressText: String {
         var parts = [vm.todayDoneCount == vm.todayPlanCount
                      ? "今日の計画 \(vm.todayPlanCount)件 すべて完了"
                      : "今日の計画 \(vm.todayDoneCount)/\(vm.todayPlanCount)件 完了"]
-        if vm.overdueOpenCount > 0 { parts.append("遅れているタスク \(vm.overdueOpenCount)件") }
+        if vm.overdueOpenCount > 0 { parts.append("遅れている分 \(vm.overdueOpenCount)件") }
         return parts.joined(separator: " · ")
     }
 
@@ -162,6 +170,7 @@ struct TodayView: View {
                 SecondaryButton("チャットを開く", systemImage: "bubble.left.and.bubble.right") {
                     router.selectedTab = .chat
                 }
+                freeStudyButton
             }
         }
     }
@@ -177,6 +186,7 @@ struct TodayView: View {
                 systemImage: "checkmark.seal.fill"
             )
             .background(Theme.secondaryBackground, in: RoundedRectangle(cornerRadius: Theme.cardCorner, style: .continuous))
+            freeStudyButton
             if !vm.completedToday.isEmpty {
                 SectionHeader("今日やったこと")
                 StudyItemList(items: vm.completedToday, style: .plain) { item in
@@ -194,11 +204,23 @@ struct TodayView: View {
         }
     }
 
+    /// やることが無いときに、計画に縛られずタイマーで勉強を始める。計測中は計測バーがあるので出さない。
+    @ViewBuilder
+    private var freeStudyButton: some View {
+        if !timer.hasSession {
+            SecondaryButton("タイマーで自習する", systemImage: "timer") {
+                router.startTimer(for: nil, timer: timer)
+            }
+            .frame(maxWidth: .infinity)
+        }
+    }
+
     @ViewBuilder
     private var nextUpSection: some View {
         if !nextUpItems.isEmpty {
             VStack(alignment: .leading, spacing: 10) {
-                SectionHeader("次にやること")
+                // ツアーの見本は本物のやることと取り違えないよう、見出しで分かるようにする。
+                SectionHeader(nextUpItems.contains(where: TourSample.isSample) ? "次にやること（見本）" : "次にやること")
                 StudyItemList(items: nextUpItems, style: .plain) { item in
                     StudyItemRow(
                         item: item,
