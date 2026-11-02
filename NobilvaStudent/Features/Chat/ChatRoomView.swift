@@ -6,6 +6,7 @@ import UIKit
 /// - スレッドがまだ無い先生は、最初の読み込み時に作る
 /// - 会話中はタブバーを隠す (メッセージ系アプリの標準)
 /// - 日付の区切り・お知らせ (管理者メッセージ) の区別・長押しコピー・画像の拡大
+/// - 先生が開いた後の自分のメッセージには「既読」を出す
 struct ChatRoomView: View {
     @EnvironmentObject var auth: AuthStore
     @EnvironmentObject var chatUnread: ChatUnreadStore
@@ -16,6 +17,8 @@ struct ChatRoomView: View {
     @State private var threadId: String?
 
     @State private var messages: [ChatMessage] = []
+    /// 先生が最後にこの会話を開いた時刻。これより前の自分のメッセージが既読。
+    @State private var teacherLastReadAt: Date?
     @State private var pending: [PendingMessage] = []
     @State private var draft = ""
     @State private var isLoading = true
@@ -126,10 +129,16 @@ struct ChatRoomView: View {
         if m.isAdminMessage == true {
             NoticeMessage(message: m)
         } else {
-            MessageBubble(message: m, isMine: m.senderId == auth.currentUser?.id) { url in
+            let isMine = m.senderId == auth.currentUser?.id
+            MessageBubble(message: m, isMine: isMine, isRead: isMine && isReadByTeacher(m)) { url in
                 viewingImage = ViewingImage(url: url)
             }
         }
+    }
+
+    private func isReadByTeacher(_ m: ChatMessage) -> Bool {
+        guard let readAt = teacherLastReadAt, let sent = JSTDate.parseTimestamp(m.createdAt) else { return false }
+        return sent <= readAt
     }
 
     private struct DayGroup { let day: String; let label: String; let messages: [ChatMessage] }
@@ -218,7 +227,10 @@ struct ChatRoomView: View {
             }
             guard let threadId else { return }
             let generation = deliveredCount
+            // 既読は取れなくても会話は見せる (古いサーバでは無いので、そのときは出さないだけ)。
+            async let readAt = try? repo().teacherLastReadAt(threadId: threadId)
             let fetched = try await repo().messages(threadId: threadId)
+            if let readAt = await readAt { teacherLastReadAt = readAt }
             // 取得中に送信が届いていたら、この一覧は古い (送ったものが入っていない) ので捨てる。
             // 送信後の取り直しが続けて走るので、そちらで反映される。
             guard generation == deliveredCount else { return }
@@ -364,6 +376,7 @@ private struct NoticeMessage: View {
 private struct MessageBubble: View {
     let message: ChatMessage
     let isMine: Bool
+    var isRead = false
     let onTapImage: (URL) -> Void
 
     var body: some View {
@@ -374,13 +387,21 @@ private struct MessageBubble: View {
         }
     }
 
-    @ViewBuilder
+    /// 時刻。自分のメッセージで先生が読んだものは、その上に「既読」を重ねる (LINE と同じ位置)。
     private var timeText: some View {
-        if let ts = JSTDate.parseTimestamp(message.createdAt) {
-            Text(JSTDate.time.string(from: ts))
-                .font(.caption2)
-                .foregroundStyle(.tertiary)
+        VStack(alignment: .trailing, spacing: 0) {
+            if isRead {
+                Text("既読")
+                    .font(.caption2)
+                    .foregroundStyle(.secondary)
+            }
+            if let ts = JSTDate.parseTimestamp(message.createdAt) {
+                Text(JSTDate.time.string(from: ts))
+                    .font(.caption2)
+                    .foregroundStyle(.tertiary)
+            }
         }
+        .accessibilityElement(children: .combine)
     }
 
     @ViewBuilder

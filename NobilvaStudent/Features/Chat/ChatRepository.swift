@@ -63,6 +63,12 @@ struct ChatRepository {
         let _: EmptyResponse = try await api.postVoid("/api/v1/student/chat/\(threadId)/read")
     }
 
+    /// 先生が最後にスレッドを開いた時刻。これより前に送った自分のメッセージは既読。
+    func teacherLastReadAt(threadId: String) async throws -> Date? {
+        let r: ChatReadStatusResponse = try await api.get("/api/v1/student/chat/\(threadId)/read")
+        return r.teacherLastReadAt.flatMap(JSTDate.parseTimestamp)
+    }
+
     /// Web `sendTaskChatMessage` 相当。
     /// スレッドを取得(なければ作成)し、`::task::` プレフィックスで包んだ相談メッセージを送る。
     @discardableResult

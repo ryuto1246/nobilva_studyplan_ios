@@ -51,6 +51,12 @@ struct ChatMessageCreatedResponse: Codable {
     }
 }
 
+/// GET /chat/{id}/read の返り値 (snake_case)。先生がまだ一度も開いていなければ nil。
+struct ChatReadStatusResponse: Codable {
+    let teacherLastReadAt: String?
+    enum CodingKeys: String, CodingKey { case teacherLastReadAt = "teacher_last_read_at" }
+}
+
 struct ChatUnreadTotalResponse: Codable {
     let total: Int
 }
