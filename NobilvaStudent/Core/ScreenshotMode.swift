@@ -8,6 +8,7 @@ import Foundation
 ///
 /// ```
 /// xcrun simctl launch <udid> com.nobilva.app -ScreenshotMode
+/// xcrun simctl launch <udid> com.nobilva.app -ScreenshotMode -ScreenshotTimer  # タイマー計測中から始める
 /// ```
 ///
 /// 日付は「今日」からの相対で作るので、いつ撮っても同じ見た目になる。
@@ -25,6 +26,22 @@ enum ScreenshotMode {
         config.protocolClasses = [ScreenshotURLProtocol.self]
         return URLSession(configuration: config)
     }()
+
+    /// 撮影モードのタイマーは毎回まっさらから始める (前回の計測を持ち越さない)。
+    /// `-ScreenshotTimer` のときだけ、数学ドリルを 12 分ほど計測中にする。
+    @MainActor
+    static var timerSnapshot: StudyTimer.Snapshot? {
+        guard isEnabled else { return nil }
+        var s = StudyTimer.Snapshot()
+        guard ProcessInfo.processInfo.arguments.contains("-ScreenshotTimer") else { return s }
+        s.phaseElapsed = 742
+        s.studySeconds = 742
+        s.resumedAt = Date()
+        s.item = .init(planItemId: "item-0-1", title: "数学基礎ドリル（20問）", subject: "数学")
+        s.sessionId = "screenshot-session"
+        s.startedAt = Date().addingTimeInterval(-742)
+        return s
+    }
 }
 
 /// API リクエストを横取りして見本データを返す。書き込み系は成功だけ返す。
@@ -168,13 +185,16 @@ enum ScreenshotFixtures {
         ["teacherId": ScreenshotMode.teacherId, "displayName": ScreenshotMode.teacherName]
     }
 
-    /// (自分が送ったか, 時刻, 本文)。すべて昨日の夜。
-    private static let conversation: [(Bool, String, String)] = [
-        (true, "20:12", "::task::{\"title\":\"数学基礎ドリル（20問）\",\"subject\":\"数学\",\"amount\":\"20問\"}\n\n来週は部活の大会があって、ドリルを全部やるのが難しそうです。"),
-        (false, "20:25", "大会前は無理をしなくて大丈夫です。来週は 20 問を 10 問に減らして、残りは大会のあとに回しましょう。計画も直しておきます。"),
-        (true, "20:31", "ありがとうございます。助かります！"),
-        (false, "21:05", "計画を更新しました。大会、がんばってください。終わったら、次の面談で一緒に見直しましょう。"),
-        (true, "21:18", "はい、がんばります。"),
+    /// (自分が送ったか, 何日前か, 時刻, 本文)。
+    private static let conversation: [(Bool, Int, String, String)] = [
+        (false, -2, "18:40", "今週の計画を作りました。部活のある日は、夜に40分くらいで終わるようにしています。"),
+        (true, -2, "19:02", "確認しました。英単語は朝にやるようにします。"),
+        (false, -2, "19:10", "いいですね。朝の20分を続けられると力になります。"),
+        (true, -1, "20:12", "::task::{\"title\":\"数学基礎ドリル（20問）\",\"subject\":\"数学\",\"amount\":\"20問\"}\n\n来週は部活の大会があって、ドリルを全部やるのが難しそうです。"),
+        (false, -1, "20:25", "大会前は無理をしなくて大丈夫です。来週は20問を10問に減らして、残りは大会のあとに回しましょう。計画も直しておきます。"),
+        (true, -1, "20:31", "ありがとうございます。助かります！"),
+        (false, -1, "21:05", "計画を更新しました。大会、がんばってください。終わったら、次の面談で一緒に見直しましょう。"),
+        (true, -1, "21:18", "はい、がんばります。"),
     ]
 
     private static var messages: [[String: Any]] {
@@ -182,8 +202,8 @@ enum ScreenshotFixtures {
             ["id": "message-\(i)", "threadId": ScreenshotMode.threadId,
              "senderId": m.0 ? ScreenshotMode.studentId : ScreenshotMode.teacherId,
              "senderName": m.0 ? ScreenshotMode.studentName : ScreenshotMode.teacherName,
-             "body": m.2, "imageUrl": NSNull(), "isAdminMessage": false,
-             "createdAt": timestamp(-1, m.1)]
+             "body": m.3, "imageUrl": NSNull(), "isAdminMessage": false,
+             "createdAt": timestamp(m.1, m.2)]
         }
     }
 
@@ -191,8 +211,8 @@ enum ScreenshotFixtures {
         let last = conversation.last!
         return ["id": ScreenshotMode.threadId, "teacherId": ScreenshotMode.teacherId,
                 "teacherName": ScreenshotMode.teacherName, "studentId": ScreenshotMode.studentId,
-                "studentName": ScreenshotMode.studentName, "lastMessageAt": timestamp(-1, last.1),
-                "lastMessageBody": last.2, "unreadCount": 0]
+                "studentName": ScreenshotMode.studentName, "lastMessageAt": timestamp(last.1, last.2),
+                "lastMessageBody": last.3, "unreadCount": 0]
     }
 
     // MARK: - プロフィール
