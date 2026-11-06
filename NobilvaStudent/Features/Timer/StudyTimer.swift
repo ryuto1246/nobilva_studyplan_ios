@@ -105,6 +105,9 @@ final class StudyTimer: ObservableObject {
         } else {
             snapshot = Snapshot()
         }
+        #if DEBUG
+        if let seeded = ScreenshotMode.timerSnapshot { snapshot = seeded }
+        #endif
         if snapshot.resumedAt != nil { startTick() }
         signOutObserver = NotificationCenter.default.addObserver(
             forName: .userDidSignOut, object: nil, queue: .main

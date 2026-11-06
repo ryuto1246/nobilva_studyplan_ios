@@ -53,6 +53,17 @@ final class AuthStore: ObservableObject, TokenProviding {
     /// - 一次失敗時は 2 秒待って 1 度だけ retry する (deploy 切り替え中の 502 対策)。
     func bootstrap() async {
         phase = .bootstrapping
+        #if DEBUG
+        // スクリーンショット撮影モード: Keychain もサーバも使わず見本の生徒としてログイン済みにする。
+        if ScreenshotMode.isEnabled {
+            DiskCache.clearAll()
+            setAccessToken("screenshot")
+            currentUser = SessionUser(id: ScreenshotMode.studentId, email: nil)
+            currentRole = "student"
+            phase = .authenticated
+            return
+        }
+        #endif
         guard Keychain.get(refreshKey) != nil else {
             phase = .unauthenticated
             return
