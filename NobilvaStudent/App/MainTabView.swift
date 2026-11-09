@@ -49,6 +49,10 @@ struct MainTabView: View {
         }
         .task {
             tour.userId = auth.currentUser?.id
+            #if DEBUG
+            // 撮影モードではツアーも通知許可のダイアログも出さない。
+            if ScreenshotMode.isEnabled { return }
+            #endif
             guard !tour.hasCompleted else {
                 await PushService.shared.requestAuthorizationAndRegister()
                 return
