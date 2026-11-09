@@ -10,6 +10,10 @@ struct MainTabView: View {
     @EnvironmentObject var timer: StudyTimer
     @EnvironmentObject var toast: ToastCenter
     @EnvironmentObject var tour: TourController
+    @Environment(\.scenePhase) private var scenePhase
+    /// 一度バックグラウンドに入ったか。復帰は background → inactive → active と
+    /// 段階を踏むので、直前の値ではなくこのフラグで「戻ってきた」を判定する。
+    @State private var wentToBackground = false
 
     enum Tab: Hashable {
         case today, chat, myPage
@@ -36,6 +40,22 @@ struct MainTabView: View {
         .task {
             chatUnread.start(api: auth.api)
             timer.attach(api: auth.api)
+            // メイン画面が出た = ログイン済みでアプリを開いた。講師側で確認できるよう記録する。
+            await AppOpenTracker.shared.record(api: auth.api)
+        }
+        // バックグラウンドから戻ってきたときも「開いた」として記録する。
+        // (通知センターを下ろしただけの inactive → active は数えない)
+        .onChange(of: scenePhase) { _, new in
+            switch new {
+            case .background:
+                wentToBackground = true
+            case .active where wentToBackground:
+                wentToBackground = false
+                guard auth.phase == .authenticated else { return }
+                Task { await AppOpenTracker.shared.record(api: auth.api) }
+            default:
+                break
+            }
         }
         .onDisappear { chatUnread.stop() }
         // 使い方ツアー。タブバーごと覆うので TabView の上に重ねる。
