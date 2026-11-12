@@ -11,6 +11,10 @@ enum SkipReason: String, CaseIterable, Identifiable {
     case schedule = "予定が入った"
 
     var id: String { rawValue }
+
+    /// 先生に相談を送ったときに自動で付ける理由。選択肢には出さない。
+    /// 先生の画面にはこの文言がそのまま出る。
+    static let consultedReason = "先生に相談した"
 }
 
 extension View {

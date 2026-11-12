@@ -101,8 +101,29 @@ struct MainTabView: View {
             RecordOnCompleteSheet(item: req.item, onChoose: req.onChoose)
         }
         .sheet(item: $router.consulting) { req in
-            TaskChatSheet(card: req.card, onSuccess: { toast.show("先生に相談を送りました") })
+            TaskChatSheet(card: req.card, onSuccess: { holdForConsultation(req.item) })
                 .environmentObject(auth)
+        }
+    }
+
+    /// 相談を送ったら、返事を待つ間その計画アイテムを「先生に相談中」(スキップ扱い) にして、
+    /// 「まずはこれ」を次のやることに進める。先生は返事のあとで計画に戻すかタスクにできる。
+    /// タスクや片付いたものは状態を変えない。
+    private func holdForConsultation(_ item: StudyItem?) {
+        guard let item, item.canSkip else {
+            toast.show("先生に相談を送りました")
+            return
+        }
+        toast.show("先生に相談を送りました。返事が来るまで、この計画はいったん外しておきます",
+                   systemImage: "bubble.left.fill", tint: Theme.accent, feel: .success)
+        Task {
+            do {
+                try await TodayRepository(api: auth.api).skip(item, reason: SkipReason.consultedReason)
+                NotificationCenter.default.post(name: .studyDataDidChange, object: nil)
+            } catch {
+                // 相談自体は届いているので、外せなかったことだけ控えめに伝える。
+                toast.showError("相談は送りましたが、計画から外せませんでした")
+            }
         }
     }
 }

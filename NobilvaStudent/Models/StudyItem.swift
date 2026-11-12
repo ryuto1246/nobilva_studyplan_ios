@@ -135,9 +135,13 @@ struct StudyItem: Identifiable, Hashable {
 
     var overdueLabel: String? { overdueDays > 0 ? "\(overdueDays)日遅れ" : nil }
 
+    /// 相談を送ったので、先生の返事を待っているもの (スキップの一種として保存している)。
+    var isWaitingForTeacher: Bool { isSkipped && skipReason == SkipReason.consultedReason }
+
     /// スキップした行の 2 行目。「スキップ · 時間が足りなかった」。
     var skippedLabel: String? {
         guard isSkipped else { return nil }
+        if isWaitingForTeacher { return "先生に相談中" }
         guard let skipReason, !skipReason.isEmpty else { return "スキップ" }
         return "スキップ · \(skipReason)"
     }
