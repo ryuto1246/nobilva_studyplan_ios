@@ -15,6 +15,8 @@ struct StudyItem: Identifiable, Hashable {
     /// 生徒が「やらない」を選んだもの。isDone も true になる。計画アイテムだけ。
     let isSkipped: Bool
     let skipReason: String?
+    /// スキップ・相談中のものに先生が対応したときの一言 (「先生が 11/20 の計画に入れ直しました」)。
+    let teacherFollowup: String?
     /// 計画アイテムの plan_date。タスクでは nil。
     let date: String?
     let startTime: String?
@@ -37,6 +39,7 @@ struct StudyItem: Identifiable, Hashable {
         isDone = p.status.isDone
         isSkipped = p.status == .skipped
         skipReason = p.status == .skipped ? p.skipReason : nil
+        teacherFollowup = p.status == .skipped ? Self.followupText(p.skipFollowup, date: p.skipFollowupDate) : nil
         self.date = date
         startTime = p.startTime
         dueDate = nil
@@ -58,6 +61,7 @@ struct StudyItem: Identifiable, Hashable {
         isDone = t.status == .completed
         isSkipped = false
         skipReason = nil
+        teacherFollowup = nil
         date = nil
         startTime = nil
         dueDate = t.dueDate
@@ -86,6 +90,8 @@ struct StudyItem: Identifiable, Hashable {
         case .done: isDone = true; isSkipped = false; skipReason = nil
         case .skipped(let reason): isDone = true; isSkipped = true; skipReason = reason
         }
+        // 手元で状態を変えたら、先生の対応はもう当てはまらない (サーバーでも消える)。
+        teacherFollowup = resolution == o.resolution ? o.teacherFollowup : nil
         date = o.date; startTime = o.startTime; dueDate = o.dueDate; overdueDays = o.overdueDays
         rationale = o.rationale; sortOrder = o.sortOrder; taskId = o.taskId; preferredTimeOfDay = o.preferredTimeOfDay
     }
@@ -135,12 +141,23 @@ struct StudyItem: Identifiable, Hashable {
 
     var overdueLabel: String? { overdueDays > 0 ? "\(overdueDays)日遅れ" : nil }
 
+    private static func followupText(_ kind: String?, date: String?) -> String? {
+        switch kind {
+        case "rescheduled":
+            guard let date else { return "先生が計画に入れ直しました" }
+            return "先生が\(JSTDate.monthDay(date))の計画に入れ直しました"
+        case "task": return "先生がタスクにしました"
+        default: return nil
+        }
+    }
+
     /// 相談を送ったので、先生の返事を待っているもの (スキップの一種として保存している)。
     var isWaitingForTeacher: Bool { isSkipped && skipReason == SkipReason.consultedReason }
 
     /// スキップした行の 2 行目。「スキップ · 時間が足りなかった」。
     var skippedLabel: String? {
         guard isSkipped else { return nil }
+        if let teacherFollowup { return teacherFollowup }
         if isWaitingForTeacher { return "先生に相談中" }
         guard let skipReason, !skipReason.isEmpty else { return "スキップ" }
         return "スキップ · \(skipReason)"

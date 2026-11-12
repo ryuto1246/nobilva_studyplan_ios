@@ -62,12 +62,17 @@ struct PlanItem: Codable, Identifiable, Hashable {
     let status: PlanItemStatus
     /// status が skipped のときに生徒が選んだ理由 (任意)。古いサーバーでは返らない。
     var skipReason: String? = nil
+    /// 先生がスキップに対応した内容 ("rescheduled" = 別の日に入れ直した / "task" = タスクにした)。
+    var skipFollowup: String? = nil
+    var skipFollowupDate: String? = nil
     let rationale: String?
     let sortOrder: Int
 
     enum CodingKeys: String, CodingKey {
         case id
         case skipReason = "skip_reason"
+        case skipFollowup = "skip_followup"
+        case skipFollowupDate = "skip_followup_date"
         case planId = "plan_id"
         case taskId = "task_id"
         case goalId = "goal_id"
