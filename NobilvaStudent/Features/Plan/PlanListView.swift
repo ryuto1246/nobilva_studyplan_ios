@@ -62,7 +62,7 @@ struct PlanListView: View {
         }
         .refreshable { await load() }
         .errorAlert($errorMessage)
-        .skipReasonDialog(item: $skipping) { item, reason in
+        .skipReasonDialog(item: $skipping, onConsult: { router.consult($0) }) { item, reason in
             Task { await set(item, to: .skipped(reason: reason)) }
         }
     }

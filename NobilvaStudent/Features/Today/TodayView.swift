@@ -69,7 +69,7 @@ struct TodayView: View {
                         .environmentObject(auth)
                 }
                 .errorAlert($vm.errorMessage)
-                .skipReasonDialog(item: $skipping) { item, reason in skip(item, reason: reason) }
+                .skipReasonDialog(item: $skipping, onConsult: { router.consult($0) }) { item, reason in skip(item, reason: reason) }
                 .onChange(of: vm.refreshFailedAt) { _, at in
                     if at != nil { toast.showError("最新の情報を読み込めませんでした") }
                 }

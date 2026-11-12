@@ -19,12 +19,26 @@ extension View {
     /// confirmationDialog は iOS 26 で「付けた View を指す吹き出し」になり、画面全体に
     /// 付けると矢印が関係ない場所を指すうえ、選択肢がアクセント色で読みにくい。
     /// 入口が 3 か所 (まずはこれ・長押し・計画一覧) あるので、下から出るシートにしている。
-    func skipReasonDialog(item: Binding<StudyItem?>, onSkip: @escaping (StudyItem, String?) -> Void) -> some View {
+    /// onConsult を渡すと、先頭に「スキップせずに先生に相談する」を出す
+    /// (「難しくて進められない」ときは、黙ってスキップするより先生に聞くほうがいいため)。
+    func skipReasonDialog(item: Binding<StudyItem?>,
+                          onConsult: ((StudyItem) -> Void)? = nil,
+                          onSkip: @escaping (StudyItem, String?) -> Void) -> some View {
         sheet(item: item) { target in
-            SkipReasonSheet(item: target) { reason in
-                item.wrappedValue = nil
-                onSkip(target, reason)
-            }
+            SkipReasonSheet(
+                item: target,
+                onConsult: onConsult.map { consult in
+                    {
+                        item.wrappedValue = nil
+                        // シートが閉じきる前に次の画面 (相談シート) を出すと出ないことがあるので少し待つ。
+                        DispatchQueue.main.asyncAfter(deadline: .now() + 0.35) { consult(target) }
+                    }
+                },
+                onSelect: { reason in
+                    item.wrappedValue = nil
+                    onSkip(target, reason)
+                }
+            )
         }
     }
 }
@@ -33,6 +47,7 @@ extension View {
 /// (ホームインジケーターの上) に隠れて押しにくいため、中身を測って高さを決める。
 private struct SkipReasonSheet: View {
     let item: StudyItem
+    var onConsult: (() -> Void)?
     let onSelect: (String?) -> Void
     @Environment(\.dismiss) private var dismiss
     @State private var contentHeight: CGFloat = 480
@@ -63,6 +78,18 @@ private struct SkipReasonSheet: View {
                 .font(.footnote)
                 .foregroundStyle(.secondary)
                 .fixedSize(horizontal: false, vertical: true)
+
+            if let onConsult {
+                Button(action: onConsult) {
+                    Label("スキップせずに先生に相談する", systemImage: "bubble.left")
+                        .frame(maxWidth: .infinity, minHeight: 50, alignment: .leading)
+                        .padding(.horizontal, 16)
+                        .contentShape(Rectangle())
+                }
+                .buttonStyle(.plain)
+                .foregroundStyle(Theme.accent)
+                .background(Theme.secondaryBackground, in: RoundedRectangle(cornerRadius: Theme.cardCorner, style: .continuous))
+            }
 
             VStack(spacing: 0) {
                 ForEach(Array(SkipReason.allCases.enumerated()), id: \.element) { i, reason in
