@@ -62,6 +62,11 @@ struct PlanListView: View {
         }
         .refreshable { await load() }
         .errorAlert($errorMessage)
+        .onReceive(NotificationCenter.default.publisher(for: .studyItemResolutionDidChange)) { note in
+            if let change = note.object as? StudyItemResolutionChange {
+                overrides[change.itemId] = Override(resolution: change.resolution, at: Date())
+            }
+        }
         .skipReasonDialog(item: $skipping, onConsult: { router.consult($0) }) { item, reason in
             Task { await set(item, to: .skipped(reason: reason)) }
         }

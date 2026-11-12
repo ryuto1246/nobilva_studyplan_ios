@@ -177,6 +177,11 @@ final class TodayViewModel: ObservableObject {
         await set(item, to: item.isDone ? .open : .done)
     }
 
+    /// 画面の外 (相談シートなど) で変えた状態を、再取得を待たずに反映する。
+    func applyExternal(_ change: StudyItemResolutionChange) {
+        overrides[change.itemId] = Override(resolution: change.resolution, at: Date())
+    }
+
     /// 計画アイテムを「やらない (スキップ)」にする。
     @discardableResult
     func skip(_ item: StudyItem, reason: String?) async -> Bool {

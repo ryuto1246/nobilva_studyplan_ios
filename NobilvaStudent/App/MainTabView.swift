@@ -116,11 +116,16 @@ struct MainTabView: View {
         }
         toast.show("先生に相談を送りました。返事が来るまで、この計画はいったん外しておきます",
                    systemImage: "bubble.left.fill", tint: Theme.accent, feel: .success)
+        let held = StudyItem.Resolution.skipped(reason: SkipReason.consultedReason)
+        NotificationCenter.default.post(name: .studyItemResolutionDidChange,
+                                        object: StudyItemResolutionChange(itemId: item.id, resolution: held))
         Task {
             do {
                 try await TodayRepository(api: auth.api).skip(item, reason: SkipReason.consultedReason)
                 NotificationCenter.default.post(name: .studyDataDidChange, object: nil)
             } catch {
+                NotificationCenter.default.post(name: .studyItemResolutionDidChange,
+                                                object: StudyItemResolutionChange(itemId: item.id, resolution: item.resolution))
                 // 相談自体は届いているので、外せなかったことだけ控えめに伝える。
                 toast.showError("相談は送りましたが、計画から外せませんでした")
             }

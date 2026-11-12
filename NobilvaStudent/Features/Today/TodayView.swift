@@ -60,6 +60,9 @@ struct TodayView: View {
                 .onReceive(NotificationCenter.default.publisher(for: .studyDataDidChange)) { _ in
                     Task { await vm.load() }
                 }
+                .onReceive(NotificationCenter.default.publisher(for: .studyItemResolutionDidChange)) { note in
+                    if let change = note.object as? StudyItemResolutionChange { vm.applyExternal(change) }
+                }
                 .sheet(isPresented: $showAddTask) {
                     TaskFormView(existing: nil) { handleFormOutcome($0) }
                         .environmentObject(auth)

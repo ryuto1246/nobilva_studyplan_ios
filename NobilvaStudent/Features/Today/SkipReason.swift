@@ -128,3 +128,15 @@ private struct SkipReasonSheet: View {
         .buttonStyle(.plain)
     }
 }
+
+/// 画面の外 (相談シートなど) で、やることの状態を変えたときの知らせ。
+/// 今日画面・計画一覧は再取得を待たずに手元の表示へ反映する
+/// (直後の再取得ではまだ古い状態が返ることがあるため)。
+struct StudyItemResolutionChange {
+    let itemId: String
+    let resolution: StudyItem.Resolution
+}
+
+extension Notification.Name {
+    static let studyItemResolutionDidChange = Notification.Name("studyItemResolutionDidChange")
+}
