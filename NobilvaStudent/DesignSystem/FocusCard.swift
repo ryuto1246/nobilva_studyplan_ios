@@ -9,6 +9,8 @@ struct FocusCard: View {
     let onStart: () -> Void
     let onComplete: () -> Void
     let onConsult: () -> Void
+    /// 「今日はやらない」。計画アイテムのときだけ渡す。
+    var onSkip: (() -> Void)?
 
     var body: some View {
         VStack(alignment: .leading, spacing: 16) {
@@ -29,6 +31,17 @@ struct FocusCard: View {
             ViewThatFits(in: .horizontal) {
                 HStack(spacing: 10) { buttons; consultButton }
                 VStack(spacing: 10) { buttons; consultButton }
+            }
+
+            // やらないと決めたときの逃げ道。主操作と並べると押し間違えるので、下に小さく置く。
+            if let onSkip {
+                Button(action: onSkip) {
+                    Label("やらない（スキップ）", systemImage: "forward.end")
+                        .font(.footnote)
+                }
+                .buttonStyle(.plain)
+                .foregroundStyle(.secondary)
+                .frame(maxWidth: .infinity, alignment: .center)
             }
         }
         .padding(20)

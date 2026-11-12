@@ -22,7 +22,7 @@ final class TodayViewModel: ObservableObject {
     @Published private(set) var refreshFailedAt: Date?
     /// 楽観的に切り替えた完了状態。直後の再取得ではまだ古い状態が返ることがあるので、
     /// 再取得のたびに消さず、切り替えから一定時間は手元の状態を優先する。
-    private struct Override { let done: Bool; let at: Date }
+    private struct Override { let resolution: StudyItem.Resolution; let at: Date }
     @Published private var overrides: [String: Override] = [:]
     private static let overrideLifetime: TimeInterval = 30
 
@@ -35,8 +35,8 @@ final class TodayViewModel: ObservableObject {
     private var today: String { JSTDate.todayString() }
 
     private func apply(_ item: StudyItem) -> StudyItem {
-        guard let done = overrides[item.id]?.done, done != item.isDone else { return item }
-        return item.withDone(done)
+        guard let r = overrides[item.id]?.resolution, r != item.resolution else { return item }
+        return item.with(r)
     }
 
     private var overdueItems: [StudyItem] {
@@ -80,7 +80,10 @@ final class TodayViewModel: ObservableObject {
     var completedToday: [StudyItem] { (overdueItems + pastPlanItems + todayItems).filter(\.isDone) }
 
     var todayPlanCount: Int { todayItems.count }
+    /// 今日の計画のうち片付いた数 (完了 + スキップ)。
     var todayDoneCount: Int { todayItems.filter(\.isDone).count }
+    var todaySkippedCount: Int { todayItems.filter(\.isSkipped).count }
+    var completedTodayHasSkipped: Bool { completedToday.contains(where: \.isSkipped) }
     var remainingMinutes: Int { actionable.reduce(0) { $0 + $1.minutes } }
 
     /// 今日の分がすべて終わったときだけ見せる明日の予定 (読み取り専用)。
@@ -170,16 +173,28 @@ final class TodayViewModel: ObservableObject {
     /// 完了トグル。失敗したら元に戻してエラーを出す。成功したら true。
     @discardableResult
     func toggle(_ item: StudyItem) async -> Bool {
+        // スキップ済みを押したときも「未完了に戻す」。
+        await set(item, to: item.isDone ? .open : .done)
+    }
+
+    /// 計画アイテムを「やらない (スキップ)」にする。
+    @discardableResult
+    func skip(_ item: StudyItem, reason: String?) async -> Bool {
+        await set(item, to: .skipped(reason: reason))
+    }
+
+    /// 状態を切り替える (取り消しにも使う)。失敗したら元に戻してエラーを出す。成功したら true。
+    @discardableResult
+    func set(_ item: StudyItem, to next: StudyItem.Resolution) async -> Bool {
         guard let api else { return false }
-        let next = !item.isDone
         let previous = overrides[item.id]
-        overrides[item.id] = Override(done: next, at: Date())
+        overrides[item.id] = Override(resolution: next, at: Date())
         do {
-            try await TodayRepository(api: api).setDone(item, done: next)
+            try await TodayRepository(api: api).apply(next, to: item)
             return true
         } catch {
             // 連打していても、この操作の前の状態に戻す。
-            if overrides[item.id]?.done == next { overrides[item.id] = previous }
+            if overrides[item.id]?.resolution == next { overrides[item.id] = previous }
             errorMessage = "更新できませんでした。通信状況を確認してください。"
             return false
         }
@@ -195,7 +210,7 @@ final class TodayViewModel: ObservableObject {
     func recordAndComplete(_ item: StudyItem, minutes: Int) async -> Bool {
         guard let api else { return false }
         let previous = overrides[item.id]
-        overrides[item.id] = Override(done: true, at: Date())
+        overrides[item.id] = Override(resolution: .done, at: Date())
         do {
             try await TodayRepository(api: api).recordAndComplete(item, minutes: minutes)
             recordedToday.insert(item.id)

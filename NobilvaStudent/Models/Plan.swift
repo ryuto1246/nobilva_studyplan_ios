@@ -60,11 +60,14 @@ struct PlanItem: Codable, Identifiable, Hashable {
     let startTime: String?
     let durationMinutes: Int
     let status: PlanItemStatus
+    /// status が skipped のときに生徒が選んだ理由 (任意)。古いサーバーでは返らない。
+    var skipReason: String? = nil
     let rationale: String?
     let sortOrder: Int
 
     enum CodingKeys: String, CodingKey {
         case id
+        case skipReason = "skip_reason"
         case planId = "plan_id"
         case taskId = "task_id"
         case goalId = "goal_id"

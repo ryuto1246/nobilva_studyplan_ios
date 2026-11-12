@@ -10,7 +10,11 @@ struct StudyItem: Identifiable, Hashable {
     let title: String
     let subject: String
     let minutes: Int
+    /// 片付いたか (完了 or スキップ)。「やること」一覧から外すかどうかはこれで決める。
     let isDone: Bool
+    /// 生徒が「やらない」を選んだもの。isDone も true になる。計画アイテムだけ。
+    let isSkipped: Bool
+    let skipReason: String?
     /// 計画アイテムの plan_date。タスクでは nil。
     let date: String?
     let startTime: String?
@@ -31,6 +35,8 @@ struct StudyItem: Identifiable, Hashable {
         subject = p.subject
         minutes = p.durationMinutes
         isDone = p.status.isDone
+        isSkipped = p.status == .skipped
+        skipReason = p.status == .skipped ? p.skipReason : nil
         self.date = date
         startTime = p.startTime
         dueDate = nil
@@ -50,6 +56,8 @@ struct StudyItem: Identifiable, Hashable {
         subject = t.subject
         minutes = t.estimatedMinutes
         isDone = t.status == .completed
+        isSkipped = false
+        skipReason = nil
         date = nil
         startTime = nil
         dueDate = t.dueDate
@@ -60,15 +68,35 @@ struct StudyItem: Identifiable, Hashable {
         preferredTimeOfDay = t.preferredTimeOfDay
     }
 
-    private init(copying o: StudyItem, isDone: Bool) {
+    /// 楽観的更新で使う、手元で切り替えた状態。
+    enum Resolution: Equatable {
+        case open, done
+        case skipped(reason: String?)
+    }
+
+    var resolution: Resolution {
+        if isSkipped { return .skipped(reason: skipReason) }
+        return isDone ? .done : .open
+    }
+
+    private init(copying o: StudyItem, resolution: Resolution) {
         id = o.id; kind = o.kind; title = o.title; subject = o.subject; minutes = o.minutes
-        self.isDone = isDone
+        switch resolution {
+        case .open: isDone = false; isSkipped = false; skipReason = nil
+        case .done: isDone = true; isSkipped = false; skipReason = nil
+        case .skipped(let reason): isDone = true; isSkipped = true; skipReason = reason
+        }
         date = o.date; startTime = o.startTime; dueDate = o.dueDate; overdueDays = o.overdueDays
         rationale = o.rationale; sortOrder = o.sortOrder; taskId = o.taskId; preferredTimeOfDay = o.preferredTimeOfDay
     }
 
     /// 楽観的更新用。完了状態だけ差し替えたコピー。
-    func withDone(_ done: Bool) -> StudyItem { StudyItem(copying: self, isDone: done) }
+    func withDone(_ done: Bool) -> StudyItem { with(done ? .done : .open) }
+
+    func with(_ resolution: Resolution) -> StudyItem { StudyItem(copying: self, resolution: resolution) }
+
+    /// スキップできるのは計画アイテムだけ (タスクにはスキップの状態が無い。やめるなら削除)。
+    var canSkip: Bool { kind == .planItem && !isDone }
 
     /// セッション開始 API に渡す plan_item_id。タスクは紐付けない。
     var planItemId: String? { kind == .planItem ? id : nil }
@@ -106,6 +134,13 @@ struct StudyItem: Identifiable, Hashable {
     }
 
     var overdueLabel: String? { overdueDays > 0 ? "\(overdueDays)日遅れ" : nil }
+
+    /// スキップした行の 2 行目。「スキップ · 時間が足りなかった」。
+    var skippedLabel: String? {
+        guard isSkipped else { return nil }
+        guard let skipReason, !skipReason.isEmpty else { return "スキップ" }
+        return "スキップ · \(skipReason)"
+    }
 
     var consultCard: ChatTaskCard {
         switch kind {

@@ -7,7 +7,10 @@ struct PlanDay: Identifiable, Hashable {
 
     var id: String { date }
 
+    /// 片付いた数 (完了 + スキップ)。帯の点やプログレスはこれで数える。
     var doneCount: Int { items.filter(\.isDone).count }
+    var completedCount: Int { items.filter { $0.isDone && !$0.isSkipped }.count }
+    var skippedCount: Int { items.filter(\.isSkipped).count }
     var totalMinutes: Int { items.reduce(0) { $0 + $1.minutes } }
     var isAllDone: Bool { !items.isEmpty && doneCount == items.count }
 
