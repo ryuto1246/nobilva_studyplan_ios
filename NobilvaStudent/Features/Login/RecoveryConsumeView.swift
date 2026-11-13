@@ -4,18 +4,24 @@ import SwiftUI
 ///
 /// フロー:
 ///   1. NobilvaStudentApp が URL を受け取り、token を抽出
-///   2. AuthStore.consumeRecoveryToken で token 消費 → セッション確立
+///   2. 確認画面を出し、ユーザーが「ログインする」を押したら
+///      AuthStore.consumeRecoveryToken で token 消費 → セッション確立
 ///   3. 成功 → PasskeyManagementView を出して「新しいパスキーを登録する」導線を提示
 ///   4. 失敗 → メッセージを出してログイン画面へ戻す
+///
+/// リンクを開いただけではトークンを使わない。他人が自分のアカウントのリンクを送りつけて
+/// 知らないうちにそのアカウントでログインさせる (ログイン CSRF) のを防ぐため、
+/// 必ずユーザーがボタンを押してから消費する。ログイン中ならアカウントが切り替わることも伝える。
 struct RecoveryConsumeView: View {
     @EnvironmentObject var auth: AuthStore
     let token: String
     let onDismiss: () -> Void
 
-    @State private var phase: Phase = .verifying
+    @State private var phase: Phase = .confirm
     @State private var errorMessage: String?
 
     enum Phase {
+        case confirm
         case verifying
         case succeeded
         case failed
@@ -26,6 +32,8 @@ struct RecoveryConsumeView: View {
             ZStack {
                 Theme.groupedBackground.ignoresSafeArea()
                 switch phase {
+                case .confirm:
+                    confirmState
                 case .verifying:
                     ProgressView("リンクを確認中…")
                 case .succeeded:
@@ -36,7 +44,35 @@ struct RecoveryConsumeView: View {
             }
             .toolbar(.hidden, for: .navigationBar)
         }
-        .task { await verify() }
+    }
+
+    private var confirmState: some View {
+        VStack(spacing: 16) {
+            Image(systemName: "envelope.open")
+                .font(.system(size: 56)).foregroundStyle(.tint)
+            Text("メールのリンクでログイン").font(.title2.bold())
+            Text("「ログインできない方はこちら」から自分でリンクを送った場合だけ、ログインしてください。覚えのないリンクは開かずに閉じてください。")
+                .multilineTextAlignment(.center)
+                .foregroundStyle(.secondary)
+            if auth.phase == .authenticated {
+                Label("いまログインしているアカウントからログアウトして、リンクのアカウントに切り替わります。", systemImage: "info.circle")
+                    .font(.subheadline)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .padding(12)
+                    .background(Color(.secondarySystemGroupedBackground), in: RoundedRectangle(cornerRadius: 12))
+            }
+            Button {
+                phase = .verifying
+                Task { await verify() }
+            } label: {
+                Text("ログインする").bold()
+                    .frame(maxWidth: .infinity).padding(.vertical, 4)
+            }
+            .buttonStyle(.borderedProminent)
+            Button("キャンセル") { onDismiss() }
+                .padding(.top, 4)
+        }
+        .padding(.horizontal, 32)
     }
 
     private var successState: some View {
