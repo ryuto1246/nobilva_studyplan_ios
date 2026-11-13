@@ -37,10 +37,16 @@ struct TodayRepository {
         )
     }
 
-    /// 計画アイテムを「やらない (スキップ)」にする。理由は先生にも見える。
+    /// 計画アイテム / タスクを「やらない (スキップ)」にする。理由は先生にも見える。
     func skip(_ item: StudyItem, reason: String?) async throws {
-        guard item.kind == .planItem else { return }
-        try await setPlanItemStatus(item.id, status: .skipped, skipReason: reason)
+        switch item.kind {
+        case .planItem: try await setPlanItemStatus(item.id, status: .skipped, skipReason: reason)
+        case .task:
+            let _: EmptyResponse = try await api.patch(
+                "/api/v1/student/tasks/\(item.id)/status",
+                body: PlanItemStatusBody(status: TaskStatus.skipped.rawValue, skipReason: reason)
+            )
+        }
     }
 
     /// 手元で切り替えた状態をサーバーに送る (楽観的更新の取り消しにも使う)。

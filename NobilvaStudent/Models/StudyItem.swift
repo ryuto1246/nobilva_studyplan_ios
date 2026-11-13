@@ -50,6 +50,7 @@ struct StudyItem: Identifiable, Hashable {
         sortOrder = p.sortOrder
         taskId = p.taskId
         preferredTimeOfDay = nil
+        isRecurringTask = false
     }
 
     init(task t: StudentTask) {
@@ -58,9 +59,9 @@ struct StudyItem: Identifiable, Hashable {
         title = t.title
         subject = t.subject
         minutes = t.estimatedMinutes
-        isDone = t.status == .completed
-        isSkipped = false
-        skipReason = nil
+        isDone = t.status == .completed || t.status == .skipped
+        isSkipped = t.status == .skipped
+        skipReason = t.status == .skipped ? t.skipReason : nil
         teacherFollowup = nil
         date = nil
         startTime = nil
@@ -70,6 +71,7 @@ struct StudyItem: Identifiable, Hashable {
         sortOrder = 0
         taskId = nil
         preferredTimeOfDay = t.preferredTimeOfDay
+        isRecurringTask = t.recurrence != .none
     }
 
     /// 楽観的更新で使う、手元で切り替えた状態。
@@ -94,6 +96,7 @@ struct StudyItem: Identifiable, Hashable {
         teacherFollowup = resolution == o.resolution ? o.teacherFollowup : nil
         date = o.date; startTime = o.startTime; dueDate = o.dueDate; overdueDays = o.overdueDays
         rationale = o.rationale; sortOrder = o.sortOrder; taskId = o.taskId; preferredTimeOfDay = o.preferredTimeOfDay
+        isRecurringTask = o.isRecurringTask
     }
 
     /// 楽観的更新用。完了状態だけ差し替えたコピー。
@@ -101,8 +104,11 @@ struct StudyItem: Identifiable, Hashable {
 
     func with(_ resolution: Resolution) -> StudyItem { StudyItem(copying: self, resolution: resolution) }
 
-    /// スキップできるのは計画アイテムだけ (タスクにはスキップの状態が無い。やめるなら削除)。
-    var canSkip: Bool { kind == .planItem && !isDone }
+    /// 繰り返しタスク (毎日・毎週)。スキップするとタスクごと止まってしまうのでスキップさせない。
+    let isRecurringTask: Bool
+
+    /// スキップできるか。繰り返しタスクは除く (今日だけやめたいときは計画アイテムの方をスキップする)。
+    var canSkip: Bool { !isDone && !isRecurringTask }
 
     /// セッション開始 API に渡す plan_item_id。タスクは紐付けない。
     var planItemId: String? { kind == .planItem ? id : nil }

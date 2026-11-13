@@ -396,7 +396,8 @@ struct TodayView: View {
                         onTap: { router.startTimer(for: item, timer: timer) },
                         showsStartIcon: !timer.hasSession,
                         onConsult: { router.consult(item) },
-                        onEdit: { editingTask = vm.task(id: item.id) }
+                        onEdit: { editingTask = vm.task(id: item.id) },
+                        onSkip: { skipping = item }
                     )
                 }
             }

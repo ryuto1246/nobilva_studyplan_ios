@@ -1,13 +1,14 @@
 import Foundation
 
 enum TaskStatus: String, Codable, CaseIterable, Identifiable {
-    case pending, inProgress = "in_progress", completed
+    case pending, inProgress = "in_progress", completed, skipped
     var id: String { rawValue }
     var label: String {
         switch self {
         case .pending: return "未着手"
         case .inProgress: return "取り組み中"
         case .completed: return "完了"
+        case .skipped: return "スキップ"
         }
     }
     var systemImage: String {
@@ -15,7 +16,14 @@ enum TaskStatus: String, Codable, CaseIterable, Identifiable {
         case .pending: return "circle"
         case .inProgress: return "play.circle.fill"
         case .completed: return "checkmark.circle.fill"
+        case .skipped: return "forward.end.circle.fill"
         }
+    }
+
+    /// 知らない値 (サーバーに後から足された状態) は未着手として読む。一覧ごと読めなくなるのを防ぐ。
+    init(from decoder: Decoder) throws {
+        let raw = try decoder.singleValueContainer().decode(String.self)
+        self = TaskStatus(rawValue: raw) ?? .pending
     }
 }
 
@@ -60,6 +68,8 @@ struct StudentTask: Codable, Identifiable, Hashable {
     let preferredTimeOfDay: TimeOfDay?
     let notes: String?
     let createdAt: String?
+    /// status が skipped のときに生徒が選んだ理由 (任意)。
+    var skipReason: String? = nil
 
     enum CodingKeys: String, CodingKey {
         case id
@@ -77,5 +87,6 @@ struct StudentTask: Codable, Identifiable, Hashable {
         case preferredTimeOfDay = "preferred_time_of_day"
         case notes
         case createdAt = "created_at"
+        case skipReason = "skip_reason"
     }
 }
