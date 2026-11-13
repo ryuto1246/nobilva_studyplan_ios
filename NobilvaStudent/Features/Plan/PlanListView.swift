@@ -24,8 +24,10 @@ struct PlanListView: View {
     @State private var errorMessage: String?
     /// 楽観的に切り替えた完了状態。直後の再取得ではまだ古い状態が返ることがあるので、
     /// 切り替えから一定時間は手元の状態を優先する (今日画面と同じ)。
-    private struct Override { let done: Bool; let at: Date }
+    private struct Override { let resolution: StudyItem.Resolution; let at: Date }
     @State private var overrides: [String: Override] = [:]
+    /// 「やらない」の理由を選んでいる計画アイテム。
+    @State private var skipping: StudyItem?
     @State private var recordedToday: Set<String> = []
 
     private let today = JSTDate.todayString()
@@ -60,6 +62,14 @@ struct PlanListView: View {
         }
         .refreshable { await load() }
         .errorAlert($errorMessage)
+        .onReceive(NotificationCenter.default.publisher(for: .studyItemResolutionDidChange)) { note in
+            if let change = note.object as? StudyItemResolutionChange {
+                overrides[change.itemId] = Override(resolution: change.resolution, at: Date())
+            }
+        }
+        .skipReasonDialog(item: $skipping, onConsult: { router.consult($0) }) { item, reason in
+            Task { await set(item, to: .skipped(reason: reason)) }
+        }
     }
 
     /// 帯に並べる日。計画のある日と今日 (計画が無くても) を合わせる。
@@ -103,7 +113,7 @@ struct PlanListView: View {
                 StudyItemList(items: open, style: .plain, dividerInset: isFuture ? 12 : 56) { item in row(item, isFuture: isFuture) }
             }
             if !done.isEmpty {
-                Text("完了したもの")
+                Text(done.contains(where: \.isSkipped) ? "完了・スキップしたもの" : "完了したもの")
                     .font(.subheadline.weight(.semibold))
                     .foregroundStyle(.secondary)
                     .padding(.top, 12)
@@ -119,14 +129,16 @@ struct PlanListView: View {
             // 先の日に「取り組む」は誤タップが痛いので出さない。
             onTap: isFuture || item.isDone ? nil : { router.startTimer(for: item, timer: timer) },
             showsStartIcon: !timer.hasSession,
-            onConsult: { router.consult(item) }
+            onConsult: { router.consult(item) },
+            // 先の日は完了と同じく触らせない (やるかどうかは当日に決める)。
+            onSkip: isFuture ? nil : { skipping = item }
         )
     }
 
     private func apply(_ day: PlanDay) -> PlanDay {
         PlanDay(date: day.date, items: day.items.map { item in
-            guard let done = overrides[item.id]?.done, done != item.isDone else { return item }
-            return item.withDone(done)
+            guard let r = overrides[item.id]?.resolution, r != item.resolution else { return item }
+            return item.with(r)
         })
     }
 
@@ -162,7 +174,7 @@ struct PlanListView: View {
 
     private func recordAndComplete(_ item: StudyItem, minutes: Int) async {
         let previous = overrides[item.id]
-        overrides[item.id] = Override(done: true, at: Date())
+        overrides[item.id] = Override(resolution: .done, at: Date())
         toast.show("\(formatMinutes(minutes))を記録して完了しました")
         do {
             try await TodayRepository(api: auth.api).recordAndComplete(item, minutes: minutes)
@@ -182,23 +194,35 @@ struct PlanListView: View {
     }
 
     private func toggle(_ item: StudyItem) async {
-        let next = !item.isDone
+        // スキップ済みを押したときも「未完了に戻す」。
+        await set(item, to: item.isDone ? .open : .done)
+    }
+
+    /// 完了・未完了・スキップを切り替える。押した瞬間に知らせ (通信を待たない)、失敗したら戻す。
+    private func set(_ item: StudyItem, to next: StudyItem.Resolution) async {
+        let before = item.resolution
         let previous = overrides[item.id]
-        overrides[item.id] = Override(done: next, at: Date())
-        // 押した瞬間に知らせる (通信を待たない)。
-        if next {
+        overrides[item.id] = Override(resolution: next, at: Date())
+        switch next {
+        case .done:
             toast.show("「\(item.title)」を完了しました", actionTitle: "元に戻す") {
-                Task { await toggle(item.withDone(true)) }
+                Task { await set(item.with(.done), to: before) }
             }
-        } else {
-            toast.show("未完了に戻しました", systemImage: "arrow.uturn.backward.circle.fill", tint: .secondary, feel: .neutral)
+        case .skipped:
+            toast.show("「\(item.title)」をスキップしました", systemImage: "forward.end.circle.fill",
+                       tint: .secondary, feel: .neutral, actionTitle: "元に戻す") {
+                Task { await set(item.with(next), to: before) }
+            }
+        case .open:
+            toast.show(item.isSkipped ? "スキップを取り消しました" : "未完了に戻しました",
+                       systemImage: "arrow.uturn.backward.circle.fill", tint: .secondary, feel: .neutral)
         }
         do {
-            try await TodayRepository(api: auth.api).setDone(item, done: next)
+            try await TodayRepository(api: auth.api).apply(next, to: item)
             NotificationCenter.default.post(name: .studyDataDidChange, object: nil)
         } catch {
             toast.dismiss()
-            if overrides[item.id]?.done == next { overrides[item.id] = previous }
+            if overrides[item.id]?.resolution == next { overrides[item.id] = previous }
             errorMessage = "更新できませんでした。通信状況を確認してください。"
         }
     }
@@ -217,9 +241,9 @@ private struct DaySummaryHeader: View {
                     .accessibilityAddTraits(.isHeader)
                 Spacer()
                 if !day.items.isEmpty {
-                    Text(day.isAllDone ? "すべて完了" : "\(day.doneCount)/\(day.items.count)件 完了")
+                    Text(statusText)
                         .font(.subheadline)
-                        .foregroundStyle(day.isAllDone ? .green : .secondary)
+                        .foregroundStyle(day.isAllDone && day.skippedCount == 0 ? .green : .secondary)
                         .monospacedDigit()
                 }
             }
@@ -235,6 +259,14 @@ private struct DaySummaryHeader: View {
             }
         }
         .padding(.top, 4)
+    }
+
+    /// スキップは完了に数えず、あれば「スキップ n」を添える。
+    private var statusText: String {
+        let skipped = day.skippedCount
+        if day.isAllDone && skipped == 0 { return "すべて完了" }
+        let base = "\(day.completedCount)/\(day.items.count)件 完了"
+        return skipped > 0 ? "\(base) · スキップ \(skipped)" : base
     }
 
     private var relativeLabel: String {

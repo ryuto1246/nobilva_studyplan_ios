@@ -1,7 +1,9 @@
 import SwiftUI
 
 /// 今日画面の先頭に 1 件だけ大きく出す「まずはこれ」。
-/// 取り組む (主) / 完了 (副) / 相談 (補助) の 3 操作を、迷わない大きさで並べる。
+/// 取り組む (主) / 完了 (副) / スキップ (補助) の 3 操作を、迷わない大きさで並べる。
+/// 計画アイテムでは右端がスキップ (相談はスキップのシートの先頭から行ける)。
+/// スキップできないタスクでは、右端は今までどおり相談。
 struct FocusCard: View {
     let item: StudyItem
     /// 別の計測中なら「取り組む」ではなく「タイマーを開く」にする。
@@ -9,6 +11,8 @@ struct FocusCard: View {
     let onStart: () -> Void
     let onComplete: () -> Void
     let onConsult: () -> Void
+    /// 「やらない (スキップ)」。計画アイテムのときだけ渡す。渡すと右端の相談ボタンと入れ替わる。
+    var onSkip: (() -> Void)?
 
     var body: some View {
         VStack(alignment: .leading, spacing: 16) {
@@ -25,10 +29,10 @@ struct FocusCard: View {
                 }
             }
 
-            // 相談は主操作ではないので、同じ列の右端に小さなアイコンボタンとして置く。
+            // 補助の操作は主操作ではないので、同じ列の右端に小さなアイコンボタンとして置く。
             ViewThatFits(in: .horizontal) {
-                HStack(spacing: 10) { buttons; consultButton }
-                VStack(spacing: 10) { buttons; consultButton }
+                HStack(spacing: 10) { buttons; trailingButton }
+                VStack(spacing: 10) { buttons; trailingButton }
             }
         }
         .padding(20)
@@ -40,15 +44,24 @@ struct FocusCard: View {
         )
     }
 
-    private var consultButton: some View {
-        Button(action: onConsult) {
-            Image(systemName: "bubble.left")
+    @ViewBuilder
+    private var trailingButton: some View {
+        if let onSkip {
+            iconButton("forward.end", label: "やらない（スキップ）", action: onSkip)
+        } else {
+            iconButton("bubble.left", label: "先生に相談する", action: onConsult)
+        }
+    }
+
+    private func iconButton(_ systemImage: String, label: String, action: @escaping () -> Void) -> some View {
+        Button(action: action) {
+            Image(systemName: systemImage)
                 .font(.body.weight(.semibold))
                 .frame(minWidth: 34, minHeight: 34)
         }
         .buttonStyle(.bordered)
         .tint(.secondary)
-        .accessibilityLabel("先生に相談する")
+        .accessibilityLabel(label)
     }
 
     @ViewBuilder

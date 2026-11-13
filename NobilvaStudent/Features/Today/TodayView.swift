@@ -22,6 +22,8 @@ struct TodayView: View {
     @State private var showAddTask = false
     @State private var editingTask: StudentTask?
     @State private var showCompleted = false
+    /// 「やらない」の理由を選んでいる計画アイテム。
+    @State private var skipping: StudyItem?
 
     var body: some View {
         NavigationStack {
@@ -58,6 +60,9 @@ struct TodayView: View {
                 .onReceive(NotificationCenter.default.publisher(for: .studyDataDidChange)) { _ in
                     Task { await vm.load() }
                 }
+                .onReceive(NotificationCenter.default.publisher(for: .studyItemResolutionDidChange)) { note in
+                    if let change = note.object as? StudyItemResolutionChange { vm.applyExternal(change) }
+                }
                 .sheet(isPresented: $showAddTask) {
                     TaskFormView(existing: nil) { handleFormOutcome($0) }
                         .environmentObject(auth)
@@ -67,6 +72,7 @@ struct TodayView: View {
                         .environmentObject(auth)
                 }
                 .errorAlert($vm.errorMessage)
+                .skipReasonDialog(item: $skipping, onConsult: { router.consult($0) }) { item, reason in skip(item, reason: reason) }
                 .onChange(of: vm.refreshFailedAt) { _, at in
                     if at != nil { toast.showError("最新の情報を読み込めませんでした") }
                 }
@@ -140,10 +146,19 @@ struct TodayView: View {
     }
 
     /// 分母は今日の計画だけ。期限切れのタスクや前日までの残りは別に数える (混ぜると数が合わなくなる)。
+    /// スキップは完了に数えず、別に「スキップ n件」と出す。
     private var progressText: String {
-        var parts = [vm.todayDoneCount == vm.todayPlanCount
+        let skipped = vm.todaySkippedCount
+        let completed = vm.todayDoneCount - skipped
+        var parts: [String]
+        if vm.todayDoneCount == vm.todayPlanCount {
+            parts = [skipped == 0
                      ? "今日の計画 \(vm.todayPlanCount)件 すべて完了"
-                     : "今日の計画 \(vm.todayDoneCount)/\(vm.todayPlanCount)件 完了"]
+                     : "今日の計画 \(vm.todayPlanCount)件 完了 \(completed)件・スキップ \(skipped)件"]
+        } else {
+            parts = ["今日の計画 \(completed)/\(vm.todayPlanCount)件 完了"]
+            if skipped > 0 { parts.append("スキップ \(skipped)件") }
+        }
         if vm.overdueOpenCount > 0 { parts.append("遅れている分 \(vm.overdueOpenCount)件") }
         return parts.joined(separator: " · ")
     }
@@ -156,7 +171,8 @@ struct TodayView: View {
                 isTiming: timer.hasSession,
                 onStart: { router.startTimer(for: focus, timer: timer) },
                 onComplete: { toggle(focus) },
-                onConsult: { router.consult(focus) }
+                onConsult: { router.consult(focus) },
+                onSkip: focus.canSkip && !TourSample.isSample(focus) ? { skipping = focus } : nil
             )
         } else if vm.todayPlanCount > 0 || !vm.completedToday.isEmpty {
             allDoneSection
@@ -181,14 +197,16 @@ struct TodayView: View {
         VStack(alignment: .leading, spacing: 12) {
             // 一日の区切りなので、ここだけはカードにして目立たせる。
             InlineEmptyState(
-                title: "今日の計画はすべて完了しました",
-                message: "お疲れさまでした。",
+                title: vm.todaySkippedCount > 0 ? "今日の計画は終わりました" : "今日の計画はすべて完了しました",
+                message: vm.todaySkippedCount > 0
+                    ? "お疲れさまでした。スキップしたものは先生にも伝わっています。"
+                    : "お疲れさまでした。",
                 systemImage: "checkmark.seal.fill"
             )
             .background(Theme.secondaryBackground, in: RoundedRectangle(cornerRadius: Theme.cardCorner, style: .continuous))
             freeStudyButton
             if !vm.completedToday.isEmpty {
-                SectionHeader("今日やったこと")
+                SectionHeader(vm.completedTodayHasSkipped ? "今日完了・スキップしたもの" : "今日やったこと")
                 StudyItemList(items: vm.completedToday, style: .plain) { item in
                     StudyItemRow(item: item, onToggle: { toggle(item) })
                 }
@@ -229,7 +247,8 @@ struct TodayView: View {
                         // 計測中は ▶ を出さない (押しても今の計測が開くだけなので)。
                         showsStartIcon: !timer.hasSession,
                         onConsult: { router.consult(item) },
-                        onEdit: vm.task(id: item.id).map { t in { editingTask = t } }
+                        onEdit: vm.task(id: item.id).map { t in { editingTask = t } },
+                        onSkip: TourSample.isSample(item) ? nil : { skipping = item }
                     )
                 }
             }
@@ -242,7 +261,12 @@ struct TodayView: View {
         let done = vm.completedToday
         if !done.isEmpty && vm.focus != nil {
             VStack(alignment: .leading, spacing: 8) {
-                CollapsibleHeader(title: "今日完了したもの (\(done.count)件)", isExpanded: $showCompleted)
+                CollapsibleHeader(
+                    title: vm.completedTodayHasSkipped
+                        ? "今日完了・スキップしたもの (\(done.count)件)"
+                        : "今日完了したもの (\(done.count)件)",
+                    isExpanded: $showCompleted
+                )
                 if showCompleted {
                     StudyItemList(items: done, style: .plain) { item in
                         StudyItemRow(item: item, onToggle: { toggle(item) })
@@ -312,8 +336,23 @@ struct TodayView: View {
         completeWithoutRecord(item)
     }
 
+    /// 「やらない (スキップ)」。完了と同じく押した瞬間に知らせ、「元に戻す」で取り消せる。
+    private func skip(_ item: StudyItem, reason: String?) {
+        guard item.canSkip else { return }
+        let previous = item.resolution
+        toast.show("「\(item.title)」をスキップしました", systemImage: "forward.end.circle.fill",
+                   tint: .secondary, feel: .neutral, actionTitle: "元に戻す") {
+            Task { await vm.set(item, to: previous) }
+        }
+        Task {
+            if await vm.skip(item, reason: reason) == false { toast.dismiss() }
+        }
+    }
+
     private func completeWithoutRecord(_ item: StudyItem) {
-        if item.isDone {
+        if item.isSkipped {
+            toast.show("スキップを取り消しました", systemImage: "arrow.uturn.backward.circle.fill", tint: .secondary, feel: .neutral)
+        } else if item.isDone {
             toast.show("未完了に戻しました", systemImage: "arrow.uturn.backward.circle.fill", tint: .secondary, feel: .neutral)
         } else {
             toast.show("「\(item.title)」を完了しました", actionTitle: "元に戻す") {

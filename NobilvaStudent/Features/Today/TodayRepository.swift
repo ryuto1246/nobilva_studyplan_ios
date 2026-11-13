@@ -19,11 +19,37 @@ struct TodayRepository {
     /// PlanItem のステータス更新 (Todo チェック用)。
     struct StatusBody: Encodable { let status: String }
 
-    func setPlanItemStatus(_ id: String, status: PlanItemStatus) async throws {
+    /// 計画アイテム用。skip_reason は status が skipped のときだけサーバーに残る。
+    struct PlanItemStatusBody: Encodable {
+        let status: String
+        let skipReason: String?
+
+        enum CodingKeys: String, CodingKey {
+            case status
+            case skipReason = "skip_reason"
+        }
+    }
+
+    func setPlanItemStatus(_ id: String, status: PlanItemStatus, skipReason: String? = nil) async throws {
         let _: EmptyResponse = try await api.patch(
             "/api/v1/student/plan/items/\(id)/status",
-            body: StatusBody(status: status.rawValue)
+            body: PlanItemStatusBody(status: status.rawValue, skipReason: skipReason)
         )
+    }
+
+    /// 計画アイテムを「やらない (スキップ)」にする。理由は先生にも見える。
+    func skip(_ item: StudyItem, reason: String?) async throws {
+        guard item.kind == .planItem else { return }
+        try await setPlanItemStatus(item.id, status: .skipped, skipReason: reason)
+    }
+
+    /// 手元で切り替えた状態をサーバーに送る (楽観的更新の取り消しにも使う)。
+    func apply(_ resolution: StudyItem.Resolution, to item: StudyItem) async throws {
+        switch resolution {
+        case .open: try await setDone(item, done: false)
+        case .done: try await setDone(item, done: true)
+        case .skipped(let reason): try await skip(item, reason: reason)
+        }
     }
 
     /// 計画アイテム / タスクどちらでも、完了 ⇄ 未完了を切り替える。
