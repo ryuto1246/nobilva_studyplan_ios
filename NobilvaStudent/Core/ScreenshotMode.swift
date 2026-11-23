@@ -9,6 +9,7 @@ import Foundation
 /// ```
 /// xcrun simctl launch <udid> com.nobilva.app -ScreenshotMode
 /// xcrun simctl launch <udid> com.nobilva.app -ScreenshotMode -ScreenshotTimer  # タイマー計測中から始める
+/// xcrun simctl launch <udid> com.nobilva.app -ScreenshotMode -ScreenshotTab chat  # チャット (myPage も可) から始める
 /// ```
 ///
 /// 日付は「今日」からの相対で作るので、いつ撮っても同じ見た目になる。
