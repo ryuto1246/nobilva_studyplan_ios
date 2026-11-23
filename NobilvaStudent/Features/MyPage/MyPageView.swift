@@ -5,10 +5,14 @@ import SwiftUI
 struct MyPageView: View {
     @EnvironmentObject var auth: AuthStore
     @EnvironmentObject var tour: TourController
+    @Environment(\.horizontalSizeClass) private var sizeClass
     @State private var stats: StudyStats?
     @State private var planDays: [PlanDay] = PlanDay.from(PlanRepository.cachedPeriods() ?? [])
-    /// 週の帯で選んだ日。選ぶとその日の計画を開く。
-    @State private var openingDate: String?
+    /// iPhone: push した画面の積み重ね。
+    @State private var path: [MyPageRoute] = []
+    /// iPad: 右側に出している画面。最初は計画を出しておく (空の画面を見せない)。
+    @State private var selection: MyPageRoute? = .plans(date: nil)
+    @State private var columnVisibility: NavigationSplitViewVisibility = .all
     @State private var showLogoutConfirm = false
 
     static let appVersion: String = {
@@ -18,110 +22,181 @@ struct MyPageView: View {
         return "\(version) (\(build))"
     }()
 
+    private var isRegular: Bool { sizeClass == .regular }
+
     var body: some View {
-        NavigationStack {
-            ScrollViewReader { proxy in
-                List {
-                    Section {
-                        // 1 週間の計画をそのまま見せる。日付をタップするとその日の計画を開く。
-                        WeekStrip(days: PlanDay.week(from: planDays), selected: nil, fillsWidth: true) { openingDate = $0 }
-                            .listRowInsets(EdgeInsets(top: 8, leading: 8, bottom: 8, trailing: 8))
-                            .tourTarget(.myPageWeek)
-                            .id(TourTarget.myPageWeek)
-                        NavigationLink { PlanListView() } label: {
-                            LabeledRow("すべての計画", systemImage: "calendar")
-                        }
-                    } header: {
-                        Text("これからの計画")
-                    }
-
-                    Section {
-                        // 学習記録はここでそのまま見られるようにし、日ごとの内訳だけ詳細画面へ。
-                        Group {
-                            if let stats {
-                                StudySummaryView(stats: stats)
-                                    .padding(.vertical, 8)
-                            } else {
-                                ProgressView().frame(maxWidth: .infinity, minHeight: 120)
-                            }
-                        }
-                        .tourTarget(.myPageStats)
-                        .id(TourTarget.myPageStats)
-                    } header: {
-                        Text("学習記録")
-                    }
-
-                    Section("予定") {
-                        NavigationLink { MeetingListView() } label: {
-                            LabeledRow("面談", systemImage: "person.2.fill")
-                        }
-                        NavigationLink { BusySlotsEditorView() } label: {
-                            LabeledRow("使えない時間", systemImage: "clock.badge.xmark")
-                        }
-                        .tourTarget(.myPageBusySlots)
-                        .id(TourTarget.myPageBusySlots)
-                    }
-
-                    Section("設定") {
-                        NavigationLink { AccountView() } label: {
-                            LabeledRow("アカウント", systemImage: "person.crop.circle")
-                        }
-                        NavigationLink { StudySettingsView() } label: {
-                            LabeledRow("学年・学習時間", systemImage: "graduationcap")
-                        }
-                        NavigationLink { PomodoroSettingsView() } label: {
-                            LabeledRow("ポモドーロ", systemImage: "timer")
-                        }
-                        NavigationLink { NotificationsSettingsView() } label: {
-                            LabeledRow("通知", systemImage: "bell")
-                        }
-                        NavigationLink { SecuritySettingsView() } label: {
-                            LabeledRow("パスキー・パスワード", systemImage: "lock.shield")
+        Group {
+            if isRegular {
+                // iPad: 左にメニュー、右に選んだ画面 (設定アプリと同じ形)。
+                NavigationSplitView(columnVisibility: $columnVisibility) {
+                    menu
+                        .navigationSplitViewColumnWidth(min: 340, ideal: 380, max: 440)
+                } detail: {
+                    NavigationStack {
+                        if let selection {
+                            destination(selection)
+                        } else {
+                            ContentUnavailableView("項目を選んでください", systemImage: "person.crop.circle")
                         }
                     }
-
-                    Section("ヘルプ") {
-                        Button { tour.start() } label: {
-                            LabeledRow("使い方", systemImage: "questionmark.circle")
-                                .foregroundStyle(Color.primary)
-                        }
-                        .tourTarget(.myPageGuide)
-                        .id(TourTarget.myPageGuide)
-                        ExternalLinkRow("利用規約", url: "https://nectere.jp/ja/legal/nobilva/terms-of-service")
-                        ExternalLinkRow("プライバシーポリシー", url: "https://nectere.jp/ja/legal/privacy-policy")
-                        ExternalLinkRow("特定商取引法に基づく表記", url: "https://nectere.jp/ja/legal/nobilva/commercial-disclosure")
-                    }
-
-                    Section {
-                        Button("ログアウト", role: .destructive) { showLogoutConfirm = true }
-                            .confirmationDialog("ログアウトしますか？", isPresented: $showLogoutConfirm, titleVisibility: .visible) {
-                                Button("ログアウト", role: .destructive) { Task { await auth.logout() } }
-                            }
-                        NavigationLink { DeleteAccountView() } label: {
-                            Text("アカウントを削除").foregroundStyle(.red)
-                        }
-                    } footer: {
-                        Text("バージョン \(Self.appVersion)")
-                            .frame(maxWidth: .infinity)
-                            .padding(.top, 8)
-                    }
+                    .id(selection)
                 }
-                .navigationTitle("マイページ")
-                // ツアーが画面外の行を指したらそこまでスクロールする。
-                .onChange(of: tour.current?.target) { _, target in
-                    guard let target, tour.current?.tab == .myPage else { return }
-                    withAnimation { proxy.scrollTo(target, anchor: .center) }
+                .navigationSplitViewStyle(.balanced)
+            } else {
+                NavigationStack(path: $path) {
+                    menu
+                        .navigationDestination(for: MyPageRoute.self) { destination($0) }
                 }
-            }
-            .navigationDestination(item: $openingDate) { date in PlanListView(initialDate: date) }
-            .task { await loadSummaries() }
-            .onReceive(NotificationCenter.default.publisher(for: .studyDataDidChange)) { _ in
-                Task { await loadSummaries() }
             }
         }
         // push 先の画面でも計測バーを出すため、NavigationStack の外側に付ける。
         .timerAccessory()
     }
+
+    /// 週の帯で日付を選んだら、その日の計画を開く。
+    private func open(_ route: MyPageRoute) {
+        if isRegular { selection = route } else { path.append(route) }
+    }
+
+    @ViewBuilder
+    private var menu: some View {
+        ScrollViewReader { proxy in
+            Group {
+                // iPad は選択中の行を強調するため selection 付きの List にする。
+                if isRegular {
+                    List(selection: $selection) { sections }
+                } else {
+                    List { sections }
+                }
+            }
+            .listStyle(.insetGrouped)
+            .navigationTitle("マイページ")
+            // ツアーが画面外の行を指したらそこまでスクロールする。
+            .onChange(of: tour.current?.target) { _, target in
+                guard let target, tour.current?.tab == .myPage else { return }
+                withAnimation { proxy.scrollTo(target, anchor: .center) }
+            }
+        }
+        .task { await loadSummaries() }
+        .onReceive(NotificationCenter.default.publisher(for: .studyDataDidChange)) { _ in
+            Task { await loadSummaries() }
+        }
+    }
+
+    @ViewBuilder
+    private var sections: some View {
+        Section {
+            // 1 週間の計画をそのまま見せる。日付をタップするとその日の計画を開く。
+            WeekStrip(days: PlanDay.week(from: planDays), selected: nil, fillsWidth: true) { open(.plans(date: $0)) }
+                .listRowInsets(EdgeInsets(top: 8, leading: 8, bottom: 8, trailing: 8))
+                .tourTarget(.myPageWeek)
+                .id(TourTarget.myPageWeek)
+            NavigationLink(value: MyPageRoute.plans(date: nil)) {
+                LabeledRow("すべての計画", systemImage: "calendar")
+            }
+        } header: {
+            Text("これからの計画")
+        }
+
+        Section {
+            // 学習記録はここでそのまま見られるようにし、日ごとの内訳だけ詳細画面へ。
+            Group {
+                if let stats {
+                    StudySummaryView(stats: stats)
+                        .padding(.vertical, 8)
+                } else {
+                    ProgressView().frame(maxWidth: .infinity, minHeight: 120)
+                }
+            }
+            .tourTarget(.myPageStats)
+            .id(TourTarget.myPageStats)
+        } header: {
+            Text("学習記録")
+        }
+
+        Section("予定") {
+            NavigationLink(value: MyPageRoute.meetings) {
+                LabeledRow("面談", systemImage: "person.2.fill")
+            }
+            NavigationLink(value: MyPageRoute.busySlots) {
+                LabeledRow("使えない時間", systemImage: "clock.badge.xmark")
+            }
+            .tourTarget(.myPageBusySlots)
+            .id(TourTarget.myPageBusySlots)
+        }
+
+        Section("設定") {
+            NavigationLink(value: MyPageRoute.account) {
+                LabeledRow("アカウント", systemImage: "person.crop.circle")
+            }
+            NavigationLink(value: MyPageRoute.study) {
+                LabeledRow("学年・学習時間", systemImage: "graduationcap")
+            }
+            NavigationLink(value: MyPageRoute.pomodoro) {
+                LabeledRow("ポモドーロ", systemImage: "timer")
+            }
+            NavigationLink(value: MyPageRoute.notifications) {
+                LabeledRow("通知", systemImage: "bell")
+            }
+            NavigationLink(value: MyPageRoute.security) {
+                LabeledRow("パスキー・パスワード", systemImage: "lock.shield")
+            }
+        }
+
+        Section("ヘルプ") {
+            Button { tour.start() } label: {
+                LabeledRow("使い方", systemImage: "questionmark.circle")
+                    .foregroundStyle(Color.primary)
+            }
+            .tourTarget(.myPageGuide)
+            .id(TourTarget.myPageGuide)
+            ExternalLinkRow("利用規約", url: "https://nectere.jp/ja/legal/nobilva/terms-of-service")
+            ExternalLinkRow("プライバシーポリシー", url: "https://nectere.jp/ja/legal/privacy-policy")
+            ExternalLinkRow("特定商取引法に基づく表記", url: "https://nectere.jp/ja/legal/nobilva/commercial-disclosure")
+        }
+
+        Section {
+            Button("ログアウト", role: .destructive) { showLogoutConfirm = true }
+                .confirmationDialog("ログアウトしますか？", isPresented: $showLogoutConfirm, titleVisibility: .visible) {
+                    Button("ログアウト", role: .destructive) { Task { await auth.logout() } }
+                }
+            NavigationLink(value: MyPageRoute.deleteAccount) {
+                Text("アカウントを削除").foregroundStyle(.red)
+            }
+        } footer: {
+            Text("バージョン \(Self.appVersion)")
+                .frame(maxWidth: .infinity)
+                .padding(.top, 8)
+        }
+    }
+
+    @ViewBuilder
+    private func destination(_ route: MyPageRoute) -> some View {
+        switch route {
+        case .plans(let date): PlanListView(initialDate: date)
+        case .meetings: MeetingListView()
+        case .busySlots: BusySlotsEditorView()
+        case .account: AccountView()
+        case .study: StudySettingsView()
+        case .pomodoro: PomodoroSettingsView()
+        case .notifications: NotificationsSettingsView()
+        case .security: SecuritySettingsView()
+        case .deleteAccount: DeleteAccountView()
+        }
+    }
+}
+
+/// マイページから開ける画面。iPhone では push、iPad では右側に出す。
+enum MyPageRoute: Hashable {
+    case plans(date: String?)
+    case meetings
+    case busySlots
+    case account
+    case study
+    case pomodoro
+    case notifications
+    case security
+    case deleteAccount
 }
 
 extension MyPageView {

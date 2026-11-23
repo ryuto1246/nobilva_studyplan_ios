@@ -124,6 +124,7 @@ struct MeetingDetailView: View {
                 }
             }
             .padding(16)
+            .readableWidth()
         }
     }
 

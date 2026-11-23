@@ -12,43 +12,85 @@ struct ChatThreadListView: View {
     @State private var isLoading = true
     @State private var loadFailed = false
 
+    @Environment(\.horizontalSizeClass) private var sizeClass
+    /// iPad (regular) で右側に出している画面。iPhone では使わない (NavigationLink で push する)。
+    @State private var selection: ChatDestination?
+    @State private var columnVisibility: NavigationSplitViewVisibility = .all
+
     var body: some View {
-        NavigationStack {
-            Group {
-                if !shownContacts.isEmpty {
-                    ScrollView {
-                        LazyVStack(spacing: 16) {
-                            ForEach(shownContacts) { c in
-                                ChatContactCard(contact: c, nextMeeting: nextMeeting(with: c))
-                                    .tourTarget(c.id == shownContacts.first?.id ? .chatFirstContact : nil)
-                            }
-                        }
-                        .padding(16)
+        Group {
+            if sizeClass == .regular {
+                // iPad: 左に先生のカード、右に会話。
+                NavigationSplitView(columnVisibility: $columnVisibility) {
+                    list
+                        .navigationSplitViewColumnWidth(min: 320, ideal: 380, max: 440)
+                } detail: {
+                    NavigationStack {
+                        detail
                     }
-                    .background(Theme.groupedBackground.ignoresSafeArea())
-                } else if isLoading {
-                    LoadingStateView()
-                } else if loadFailed {
-                    RetryStateView { await load() }
-                } else {
-                    ContentUnavailableView("チャットできる先生はまだいません", systemImage: "bubble.left.and.bubble.right",
-                                           description: Text("担当の先生が決まると、ここからチャットできます。"))
+                    // 別の先生を選んだら、右側の画面をまるごと作り直す (会話の状態を持ち越さない)。
+                    .id(selection?.key)
                 }
+                .navigationSplitViewStyle(.balanced)
+            } else {
+                NavigationStack { list }
             }
-            .navigationTitle("チャット")
-            .task {
-                if contacts.isEmpty {
-                    contacts = ChatContact.merge(threads: ChatRepository.cachedThreads() ?? [],
-                                                 partners: ChatRepository.cachedPartners() ?? [])
-                }
-                if meetings.isEmpty { meetings = MeetingsRepository.cachedList(includePast: false) ?? [] }
-                await load()
-            }
-            .refreshable { await load() }
-            .onChange(of: scenePhase) { _, p in if p == .active { Task { await load() } } }
         }
         // push 先の画面でも計測バーを出すため、NavigationStack の外側に付ける。
         .timerAccessory()
+    }
+
+    private var list: some View {
+        Group {
+            if !shownContacts.isEmpty {
+                ScrollView {
+                    LazyVStack(spacing: 16) {
+                        ForEach(shownContacts) { c in
+                            ChatContactCard(contact: c, nextMeeting: nextMeeting(with: c),
+                                            selection: sizeClass == .regular ? $selection : nil)
+                                .tourTarget(c.id == shownContacts.first?.id ? .chatFirstContact : nil)
+                        }
+                    }
+                    .padding(16)
+                    .readableWidth()
+                }
+                .background(Theme.groupedBackground.ignoresSafeArea())
+            } else if isLoading {
+                LoadingStateView()
+            } else if loadFailed {
+                RetryStateView { await load() }
+            } else {
+                ContentUnavailableView("チャットできる先生はまだいません", systemImage: "bubble.left.and.bubble.right",
+                                       description: Text("担当の先生が決まると、ここからチャットできます。"))
+            }
+        }
+        .navigationTitle("チャット")
+        .task {
+            if contacts.isEmpty {
+                contacts = ChatContact.merge(threads: ChatRepository.cachedThreads() ?? [],
+                                             partners: ChatRepository.cachedPartners() ?? [])
+            }
+            if meetings.isEmpty { meetings = MeetingsRepository.cachedList(includePast: false) ?? [] }
+            await load()
+        }
+        .refreshable { await load() }
+        .onChange(of: scenePhase) { _, p in if p == .active { Task { await load() } } }
+    }
+
+    /// iPad の右側。開いていないときは案内だけ出す。
+    /// 先生が「既読」を見て判断するので、生徒が選ぶまで会話は自動で開かない。
+    @ViewBuilder
+    private var detail: some View {
+        switch selection {
+        case .contact(let c):
+            ChatRoomView(threadId: c.threadId, teacherId: c.teacherId, title: c.name)
+        case .meeting(let id):
+            MeetingDetailView(meetingId: id)
+        case nil:
+            ContentUnavailableView("先生を選んでください", systemImage: "bubble.left.and.bubble.right",
+                                   description: Text("左の一覧から先生を選ぶと、ここに会話が表示されます。"))
+                .background(Theme.groupedBackground.ignoresSafeArea())
+        }
     }
 
     /// 先生がまだいない生徒のツアー中は、見本のカードを出して場所を指せるようにする。
@@ -82,6 +124,21 @@ extension ChatThreadListView {
                 return m.teacherId == id || m.teacher?.id == id
             }
             .min { $0.scheduledStartAt < $1.scheduledStartAt }
+    }
+}
+
+/// iPad で右側に出す画面。
+enum ChatDestination: Hashable {
+    case contact(ChatContact)
+    case meeting(id: String)
+
+    /// 右側の画面を作り直すかどうかの判定に使う。一覧の再読み込みで未読数などが
+    /// 変わっても、同じ相手なら同じ画面のままにする。
+    var key: String {
+        switch self {
+        case .contact(let c): return "contact-\(c.id)"
+        case .meeting(let id): return "meeting-\(id)"
+        }
     }
 }
 
@@ -121,12 +178,17 @@ struct ChatContact: Identifiable, Hashable {
 private struct ChatContactCard: View {
     let contact: ChatContact
     let nextMeeting: Meeting?
+    /// iPad では押すと右側に開く。nil (iPhone) のときは NavigationLink で push する。
+    var selection: Binding<ChatDestination?>?
+
+    private var isSelected: Bool {
+        guard case .contact(let c) = selection?.wrappedValue else { return false }
+        return c.id == contact.id
+    }
 
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
-            NavigationLink {
-                ChatRoomView(threadId: contact.threadId, teacherId: contact.teacherId, title: contact.name)
-            } label: {
+            link(to: .contact(contact)) {
                 VStack(alignment: .leading, spacing: 14) {
                     header
                     lastMessage
@@ -134,16 +196,13 @@ private struct ChatContactCard: View {
                 .padding(16)
                 .contentShape(Rectangle())
             }
-            .buttonStyle(.plain)
             .accessibilityElement(children: .combine)
             .accessibilityValue(contact.unread > 0 ? "未読 \(contact.unread)件" : "")
             .accessibilityHint("会話を開きます")
 
             if let m = nextMeeting {
                 Divider().padding(.leading, 16)
-                NavigationLink {
-                    MeetingDetailView(meetingId: m.id)
-                } label: {
+                link(to: .meeting(id: m.id)) {
                     HStack(spacing: 10) {
                         Image(systemName: "calendar")
                             .foregroundStyle(m.isToday ? Theme.accent : .secondary)
@@ -164,15 +223,39 @@ private struct ChatContactCard: View {
                     .padding(.vertical, 12)
                     .contentShape(Rectangle())
                 }
-                .buttonStyle(.plain)
             }
         }
         .background(Theme.secondaryBackground, in: RoundedRectangle(cornerRadius: 20, style: .continuous))
         .overlay {
-            if contact.unread > 0 {
+            if isSelected {
+                RoundedRectangle(cornerRadius: 20, style: .continuous)
+                    .strokeBorder(Theme.accent, lineWidth: 2)
+            } else if contact.unread > 0 {
                 RoundedRectangle(cornerRadius: 20, style: .continuous)
                     .strokeBorder(Theme.accent.opacity(0.4), lineWidth: 1)
             }
+        }
+        .accessibilityAddTraits(isSelected ? .isSelected : [])
+    }
+
+    /// iPhone は push、iPad は右側の画面を切り替える。
+    @ViewBuilder
+    private func link<Label: View>(to destination: ChatDestination, @ViewBuilder label: () -> Label) -> some View {
+        if let selection {
+            Button {
+                if selection.wrappedValue?.key != destination.key { selection.wrappedValue = destination }
+            } label: { label() }
+                .buttonStyle(.plain)
+        } else {
+            NavigationLink {
+                switch destination {
+                case .contact(let c):
+                    ChatRoomView(threadId: c.threadId, teacherId: c.teacherId, title: c.name)
+                case .meeting(let id):
+                    MeetingDetailView(meetingId: id)
+                }
+            } label: { label() }
+                .buttonStyle(.plain)
         }
     }
 

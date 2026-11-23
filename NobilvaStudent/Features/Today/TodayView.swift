@@ -17,6 +17,7 @@ struct TodayView: View {
     @EnvironmentObject var toast: ToastCenter
     @EnvironmentObject var tour: TourController
     @Environment(\.scenePhase) private var scenePhase
+    @Environment(\.horizontalSizeClass) private var sizeClass
     @StateObject private var vm = TodayViewModel()
 
     @State private var showAddTask = false
@@ -24,6 +25,11 @@ struct TodayView: View {
     @State private var showCompleted = false
     /// 「やらない」の理由を選んでいる計画アイテム。
     @State private var skipping: StudyItem?
+    /// iPad の右列に出す、マイページと同じ「これからの計画」と「学習記録」。
+    @State private var stats: StudyStats?
+    @State private var planDays: [PlanDay] = PlanDay.from(PlanRepository.cachedPeriods() ?? [])
+    /// 週の帯で選んだ日。選ぶとその日の計画を開く。
+    @State private var openingDate: String?
 
     var body: some View {
         NavigationStack {
@@ -59,7 +65,11 @@ struct TodayView: View {
                 }
                 .onReceive(NotificationCenter.default.publisher(for: .studyDataDidChange)) { _ in
                     Task { await vm.load() }
+                    Task { await loadOverview() }
                 }
+                // iPad の右列の分。iPhone では出さないので読み込まない。
+                .task(id: sizeClass) { await loadOverview() }
+                .navigationDestination(item: $openingDate) { date in PlanListView(initialDate: date) }
                 .onReceive(NotificationCenter.default.publisher(for: .studyItemResolutionDidChange)) { note in
                     if let change = note.object as? StudyItemResolutionChange { vm.applyExternal(change) }
                 }
@@ -91,21 +101,15 @@ struct TodayView: View {
         case .loaded:
             ScrollViewReader { proxy in
                 ScrollView {
-                    VStack(alignment: .leading, spacing: 28) {
-                        progressHeader
-                        // 面談の当日は、やることより先に面談を見せる。
-                        if vm.upcomingMeeting?.isToday == true { meetingSection }
-                        focusSection
-                            .tourTarget(focusItem != nil ? .todayFocus : nil)
-                            .id(TourTarget.todayFocus)
-                        nextUpSection
-                            .tourTarget(nextUpItems.isEmpty ? nil : .todayNextUp)
-                            .id(TourTarget.todayNextUp)
-                        if vm.upcomingMeeting?.isToday != true { meetingSection }
-                        unscheduledSection
-                        completedSection
+                    Group {
+                        if sizeClass == .regular {
+                            twoColumnLayout
+                        } else {
+                            singleColumnLayout
+                                .readableWidth()
+                        }
                     }
-                    .padding(.horizontal, 16)
+                    .padding(.horizontal, sizeClass == .regular ? 24 : 16)
                     .padding(.bottom, 24)
                 }
                 // ツアーが画面外の項目を指したらそこまでスクロールする。
@@ -115,6 +119,109 @@ struct TodayView: View {
                 }
             }
         }
+    }
+
+    // MARK: - Layout
+
+    /// iPhone と、iPad で右側に置くものが無いとき。上から重要な順に 1 列で並べる。
+    private var singleColumnLayout: some View {
+        VStack(alignment: .leading, spacing: 28) {
+            progressHeader
+            // 面談の当日は、やることより先に面談を見せる。
+            if vm.upcomingMeeting?.isToday == true { meetingSection }
+            focusBlock
+            nextUpBlock
+            if vm.upcomingMeeting?.isToday != true { meetingSection }
+            unscheduledSection
+            completedSection
+        }
+    }
+
+    /// iPad (横に広い画面)。左に今日やること、右に面談・今週の計画・学習記録などの補足。
+    /// 今日の分だけでは右が空きやすいので、マイページの計画と学習記録もここで見せる。
+    private var twoColumnLayout: some View {
+        VStack(alignment: .leading, spacing: 28) {
+            progressHeader
+            HStack(alignment: .top, spacing: 32) {
+                VStack(alignment: .leading, spacing: 28) {
+                    focusBlock
+                    nextUpBlock
+                }
+                .frame(maxWidth: .infinity, alignment: .leading)
+                VStack(alignment: .leading, spacing: 28) {
+                    meetingSection
+                    weekOverviewSection
+                    statsOverviewSection
+                    unscheduledSection
+                    completedSection
+                }
+                .frame(maxWidth: .infinity, alignment: .leading)
+            }
+        }
+        .readableWidth(Layout.wideWidth)
+    }
+
+    /// これからの 1 週間。日付をタップするとその日の計画を開く (マイページと同じ)。
+    private var weekOverviewSection: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            SectionHeader("これからの計画")
+            VStack(spacing: 0) {
+                WeekStrip(days: PlanDay.week(from: planDays), selected: nil, fillsWidth: true) { openingDate = $0 }
+                    .padding(8)
+                Divider().padding(.leading, 16)
+                NavigationLink {
+                    PlanListView()
+                } label: {
+                    HStack {
+                        Label("すべての計画", systemImage: "calendar")
+                        Spacer()
+                        Image(systemName: "chevron.right")
+                            .font(.footnote.weight(.semibold))
+                            .foregroundStyle(.tertiary)
+                    }
+                    .padding(.horizontal, 16)
+                    .padding(.vertical, 12)
+                    .contentShape(Rectangle())
+                }
+                .buttonStyle(.plain)
+            }
+            .background(Theme.secondaryBackground, in: RoundedRectangle(cornerRadius: Theme.cardCorner, style: .continuous))
+        }
+    }
+
+    private var statsOverviewSection: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            SectionHeader("学習記録")
+            Group {
+                if let stats {
+                    StudySummaryView(stats: stats)
+                } else {
+                    ProgressView().frame(maxWidth: .infinity, minHeight: 120)
+                }
+            }
+            .padding(16)
+            .background(Theme.secondaryBackground, in: RoundedRectangle(cornerRadius: Theme.cardCorner, style: .continuous))
+        }
+    }
+
+    private func loadOverview() async {
+        guard sizeClass == .regular else { return }
+        async let s = try? StudyStats.load(api: auth.api)
+        async let p = try? PlanRepository(api: auth.api).fetchPeriods()
+        if let value = await s { stats = value }
+        if let periods = await p { planDays = PlanDay.from(periods) }
+    }
+
+    private var focusBlock: some View {
+        focusSection
+            .tourTarget(focusItem != nil ? .todayFocus : nil)
+            .id(TourTarget.todayFocus)
+    }
+
+    private var nextUpBlock: some View {
+        nextUpSection
+            .tourTarget(nextUpItems.isEmpty ? nil : .todayNextUp)
+            .id(TourTarget.todayNextUp)
     }
 
     // MARK: - Sections

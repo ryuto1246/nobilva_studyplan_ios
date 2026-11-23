@@ -87,6 +87,7 @@ struct PlanListView: View {
         VStack(spacing: 0) {
             WeekStrip(days: stripDays, selected: selected) { selected = $0 }
                 .padding(.vertical, 8)
+                .readableWidth()
             Divider()
             ScrollView {
                 VStack(alignment: .leading, spacing: 8) {
@@ -96,6 +97,7 @@ struct PlanListView: View {
                 }
                 .padding(.horizontal, 16)
                 .padding(.bottom, 24)
+                .readableWidth()
                 .animation(.snappy, value: selected)
             }
         }

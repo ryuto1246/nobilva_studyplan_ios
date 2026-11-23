@@ -50,6 +50,8 @@ struct TimerAccessoryBar: View {
         .background(.regularMaterial, in: Capsule())
         .overlay(Capsule().strokeBorder(Theme.separator.opacity(0.3), lineWidth: 0.5))
         .shadow(color: .black.opacity(0.08), radius: 8, y: 2)
+        // iPad で画面の端から端まで伸びないようにする。
+        .frame(maxWidth: 520)
         .padding(.horizontal, 16)
         .padding(.bottom, 6)
     }

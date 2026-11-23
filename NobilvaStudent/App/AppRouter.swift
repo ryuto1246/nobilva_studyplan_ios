@@ -18,6 +18,16 @@ final class AppRouter: ObservableObject {
     }
 
     init() {
+        #if DEBUG
+        // 撮影モードで `-ScreenshotTab chat` / `-ScreenshotTab myPage` を付けると、そのタブから始める。
+        if ScreenshotMode.isEnabled {
+            switch UserDefaults.standard.string(forKey: "ScreenshotTab") {
+            case "chat": selectedTab = .chat
+            case "myPage": selectedTab = .myPage
+            default: break
+            }
+        }
+        #endif
         NotificationCenter.default.addObserver(forName: .userDidSignOut, object: nil, queue: .main) { [weak self] _ in
             MainActor.assumeIsolated {
                 self?.timerPresented = false

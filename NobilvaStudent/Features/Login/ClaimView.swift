@@ -53,6 +53,7 @@ struct ClaimView: View {
             .padding(.horizontal, 20)
             .padding(.top, 24)
             .padding(.bottom, 32)
+            .readableWidth(520)
         }
     }
 

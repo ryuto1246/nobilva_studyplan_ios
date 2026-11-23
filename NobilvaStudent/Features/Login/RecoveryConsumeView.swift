@@ -42,6 +42,10 @@ struct RecoveryConsumeView: View {
                     failedState
                 }
             }
+            // iPad で文章とボタンが横に伸びすぎないようにする。
+            .frame(maxWidth: 560)
+            .frame(maxWidth: .infinity, maxHeight: .infinity)
+            .background(Theme.groupedBackground.ignoresSafeArea())
             .toolbar(.hidden, for: .navigationBar)
         }
     }
