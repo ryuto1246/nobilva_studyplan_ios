@@ -36,6 +36,8 @@ struct LoginView: View {
                     .padding(.horizontal, 20)
                     .padding(.top, 8)
                     .padding(.bottom, 20)
+                    // iPad では入力欄が横に伸びすぎないよう中央に寄せる。
+                    .readableWidth(520)
                 }
                 .scrollDismissesKeyboard(.interactively)
             }
