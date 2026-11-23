@@ -25,6 +25,11 @@ struct TodayView: View {
     @State private var showCompleted = false
     /// 「やらない」の理由を選んでいる計画アイテム。
     @State private var skipping: StudyItem?
+    /// iPad の右列に出す、マイページと同じ「これからの計画」と「学習記録」。
+    @State private var stats: StudyStats?
+    @State private var planDays: [PlanDay] = PlanDay.from(PlanRepository.cachedPeriods() ?? [])
+    /// 週の帯で選んだ日。選ぶとその日の計画を開く。
+    @State private var openingDate: String?
 
     var body: some View {
         NavigationStack {
@@ -60,7 +65,11 @@ struct TodayView: View {
                 }
                 .onReceive(NotificationCenter.default.publisher(for: .studyDataDidChange)) { _ in
                     Task { await vm.load() }
+                    Task { await loadOverview() }
                 }
+                // iPad の右列の分。iPhone では出さないので読み込まない。
+                .task(id: sizeClass) { await loadOverview() }
+                .navigationDestination(item: $openingDate) { date in PlanListView(initialDate: date) }
                 .onReceive(NotificationCenter.default.publisher(for: .studyItemResolutionDidChange)) { note in
                     if let change = note.object as? StudyItemResolutionChange { vm.applyExternal(change) }
                 }
@@ -93,7 +102,7 @@ struct TodayView: View {
             ScrollViewReader { proxy in
                 ScrollView {
                     Group {
-                        if sizeClass == .regular && hasSideContent {
+                        if sizeClass == .regular {
                             twoColumnLayout
                         } else {
                             singleColumnLayout
@@ -128,7 +137,8 @@ struct TodayView: View {
         }
     }
 
-    /// iPad (横に広い画面)。左に今日やること、右に面談や日付未定のタスクなどの補足。
+    /// iPad (横に広い画面)。左に今日やること、右に面談・今週の計画・学習記録などの補足。
+    /// 今日の分だけでは右が空きやすいので、マイページの計画と学習記録もここで見せる。
     private var twoColumnLayout: some View {
         VStack(alignment: .leading, spacing: 28) {
             progressHeader
@@ -140,6 +150,8 @@ struct TodayView: View {
                 .frame(maxWidth: .infinity, alignment: .leading)
                 VStack(alignment: .leading, spacing: 28) {
                     meetingSection
+                    weekOverviewSection
+                    statsOverviewSection
                     unscheduledSection
                     completedSection
                 }
@@ -149,9 +161,55 @@ struct TodayView: View {
         .readableWidth(Layout.wideWidth)
     }
 
-    /// 右の列に出すものがあるか。無ければ 2 列にせず、1 列を中央に置く。
-    private var hasSideContent: Bool {
-        vm.upcomingMeeting != nil || !vm.unscheduled.isEmpty || (!vm.completedToday.isEmpty && vm.focus != nil)
+    /// これからの 1 週間。日付をタップするとその日の計画を開く (マイページと同じ)。
+    private var weekOverviewSection: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            SectionHeader("これからの計画")
+            VStack(spacing: 0) {
+                WeekStrip(days: PlanDay.week(from: planDays), selected: nil, fillsWidth: true) { openingDate = $0 }
+                    .padding(8)
+                Divider().padding(.leading, 16)
+                NavigationLink {
+                    PlanListView()
+                } label: {
+                    HStack {
+                        Label("すべての計画", systemImage: "calendar")
+                        Spacer()
+                        Image(systemName: "chevron.right")
+                            .font(.footnote.weight(.semibold))
+                            .foregroundStyle(.tertiary)
+                    }
+                    .padding(.horizontal, 16)
+                    .padding(.vertical, 12)
+                    .contentShape(Rectangle())
+                }
+                .buttonStyle(.plain)
+            }
+            .background(Theme.secondaryBackground, in: RoundedRectangle(cornerRadius: Theme.cardCorner, style: .continuous))
+        }
+    }
+
+    private var statsOverviewSection: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            SectionHeader("学習記録")
+            Group {
+                if let stats {
+                    StudySummaryView(stats: stats)
+                } else {
+                    ProgressView().frame(maxWidth: .infinity, minHeight: 120)
+                }
+            }
+            .padding(16)
+            .background(Theme.secondaryBackground, in: RoundedRectangle(cornerRadius: Theme.cardCorner, style: .continuous))
+        }
+    }
+
+    private func loadOverview() async {
+        guard sizeClass == .regular else { return }
+        async let s = try? StudyStats.load(api: auth.api)
+        async let p = try? PlanRepository(api: auth.api).fetchPeriods()
+        if let value = await s { stats = value }
+        if let periods = await p { planDays = PlanDay.from(periods) }
     }
 
     private var focusBlock: some View {
