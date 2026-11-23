@@ -15,12 +15,13 @@ struct ChatThreadListView: View {
     @Environment(\.horizontalSizeClass) private var sizeClass
     /// iPad (regular) で右側に出している画面。iPhone では使わない (NavigationLink で push する)。
     @State private var selection: ChatDestination?
+    @State private var columnVisibility: NavigationSplitViewVisibility = .all
 
     var body: some View {
         Group {
             if sizeClass == .regular {
                 // iPad: 左に先生のカード、右に会話。
-                NavigationSplitView {
+                NavigationSplitView(columnVisibility: $columnVisibility) {
                     list
                         .navigationSplitViewColumnWidth(min: 320, ideal: 380, max: 440)
                 } detail: {
