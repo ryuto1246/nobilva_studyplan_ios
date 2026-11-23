@@ -17,6 +17,7 @@ struct TodayView: View {
     @EnvironmentObject var toast: ToastCenter
     @EnvironmentObject var tour: TourController
     @Environment(\.scenePhase) private var scenePhase
+    @Environment(\.horizontalSizeClass) private var sizeClass
     @StateObject private var vm = TodayViewModel()
 
     @State private var showAddTask = false
@@ -91,21 +92,15 @@ struct TodayView: View {
         case .loaded:
             ScrollViewReader { proxy in
                 ScrollView {
-                    VStack(alignment: .leading, spacing: 28) {
-                        progressHeader
-                        // 面談の当日は、やることより先に面談を見せる。
-                        if vm.upcomingMeeting?.isToday == true { meetingSection }
-                        focusSection
-                            .tourTarget(focusItem != nil ? .todayFocus : nil)
-                            .id(TourTarget.todayFocus)
-                        nextUpSection
-                            .tourTarget(nextUpItems.isEmpty ? nil : .todayNextUp)
-                            .id(TourTarget.todayNextUp)
-                        if vm.upcomingMeeting?.isToday != true { meetingSection }
-                        unscheduledSection
-                        completedSection
+                    Group {
+                        if sizeClass == .regular && hasSideContent {
+                            twoColumnLayout
+                        } else {
+                            singleColumnLayout
+                                .readableWidth()
+                        }
                     }
-                    .padding(.horizontal, 16)
+                    .padding(.horizontal, sizeClass == .regular ? 24 : 16)
                     .padding(.bottom, 24)
                 }
                 // ツアーが画面外の項目を指したらそこまでスクロールする。
@@ -115,6 +110,60 @@ struct TodayView: View {
                 }
             }
         }
+    }
+
+    // MARK: - Layout
+
+    /// iPhone と、iPad で右側に置くものが無いとき。上から重要な順に 1 列で並べる。
+    private var singleColumnLayout: some View {
+        VStack(alignment: .leading, spacing: 28) {
+            progressHeader
+            // 面談の当日は、やることより先に面談を見せる。
+            if vm.upcomingMeeting?.isToday == true { meetingSection }
+            focusBlock
+            nextUpBlock
+            if vm.upcomingMeeting?.isToday != true { meetingSection }
+            unscheduledSection
+            completedSection
+        }
+    }
+
+    /// iPad (横に広い画面)。左に今日やること、右に面談や日付未定のタスクなどの補足。
+    private var twoColumnLayout: some View {
+        VStack(alignment: .leading, spacing: 28) {
+            progressHeader
+            HStack(alignment: .top, spacing: 32) {
+                VStack(alignment: .leading, spacing: 28) {
+                    focusBlock
+                    nextUpBlock
+                }
+                .frame(maxWidth: .infinity, alignment: .leading)
+                VStack(alignment: .leading, spacing: 28) {
+                    meetingSection
+                    unscheduledSection
+                    completedSection
+                }
+                .frame(maxWidth: .infinity, alignment: .leading)
+            }
+        }
+        .readableWidth(Layout.wideWidth)
+    }
+
+    /// 右の列に出すものがあるか。無ければ 2 列にせず、1 列を中央に置く。
+    private var hasSideContent: Bool {
+        vm.upcomingMeeting != nil || !vm.unscheduled.isEmpty || (!vm.completedToday.isEmpty && vm.focus != nil)
+    }
+
+    private var focusBlock: some View {
+        focusSection
+            .tourTarget(focusItem != nil ? .todayFocus : nil)
+            .id(TourTarget.todayFocus)
+    }
+
+    private var nextUpBlock: some View {
+        nextUpSection
+            .tourTarget(nextUpItems.isEmpty ? nil : .todayNextUp)
+            .id(TourTarget.todayNextUp)
     }
 
     // MARK: - Sections
