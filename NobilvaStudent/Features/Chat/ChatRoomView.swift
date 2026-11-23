@@ -11,6 +11,7 @@ struct ChatRoomView: View {
     @EnvironmentObject var auth: AuthStore
     @EnvironmentObject var chatUnread: ChatUnreadStore
     @Environment(\.scenePhase) private var scenePhase
+    @Environment(\.horizontalSizeClass) private var sizeClass
 
     let teacherId: String?
     let title: String
@@ -55,7 +56,8 @@ struct ChatRoomView: View {
             .safeAreaInset(edge: .bottom, spacing: 0) { composer }
             .navigationTitle(title)
             .navigationBarTitleDisplayMode(.inline)
-            .toolbar(.hidden, for: .tabBar)
+            // iPad では一覧と並べて出すので、タブバーは隠さない (隠すと他のタブへ移れなくなる)。
+            .toolbar(sizeClass == .regular ? .automatic : .hidden, for: .tabBar)
             .task {
                 await load(initial: true)
                 // 画面を開いている間だけ 15 秒ごとに取り直す (.task なので閉じると自動で止まる)。
@@ -105,6 +107,7 @@ struct ChatRoomView: View {
                 }
                 .padding(.horizontal, 12)
                 .padding(.vertical, 8)
+                .readableWidth(Layout.readableWidth + 120)
             }
             .defaultScrollAnchor(.bottom)
             .scrollDismissesKeyboard(.interactively)
@@ -211,6 +214,8 @@ struct ChatRoomView: View {
         }
         .padding(.horizontal, 8)
         .padding(.vertical, 6)
+        // 入力欄もメッセージと同じ幅にそろえる (背景のバーは端まで伸ばす)。
+        .readableWidth(Layout.readableWidth + 120)
         .background(.bar)
     }
 
