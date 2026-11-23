@@ -190,6 +190,7 @@ struct ChatRoomView: View {
 
                 HStack(alignment: .bottom, spacing: 4) {
                     TextField("メッセージ", text: $draft, axis: .vertical)
+                        .chatBodyFont()
                         .lineLimit(1...6)
                         .focused($isInputFocused)
                         .padding(.leading, 14)
@@ -332,6 +333,22 @@ private struct ViewingImage: Identifiable {
 
 // MARK: - Parts
 
+/// チャットの本文の文字。標準の本文 (17pt) だと日本語が小さく見えるので一回り大きくする。
+/// 端末の文字サイズ設定 (Dynamic Type) に合わせて拡大縮小する。
+private struct ChatBodyFont: ViewModifier {
+    @ScaledMetric(relativeTo: .body) private var size: CGFloat = 18.5
+
+    func body(content: Content) -> some View {
+        content.font(.system(size: size))
+    }
+}
+
+extension View {
+    fileprivate func chatBodyFont() -> some View {
+        modifier(ChatBodyFont())
+    }
+}
+
 private struct DaySeparator: View {
     let text: String
     var body: some View {
@@ -357,7 +374,7 @@ private struct NoticeMessage: View {
                 .foregroundStyle(.secondary)
             if let body = message.body, !body.isEmpty {
                 Text(body)
-                    .font(.body)
+                    .chatBodyFont()
                     .multilineTextAlignment(.center)
                     .textSelection(.enabled)
             }
@@ -397,12 +414,12 @@ private struct MessageBubble: View {
         VStack(alignment: .trailing, spacing: 0) {
             if isRead {
                 Text("既読")
-                    .font(.caption2)
+                    .font(.caption)
                     .foregroundStyle(.secondary)
             }
             if let ts = JSTDate.parseTimestamp(message.createdAt) {
                 Text(JSTDate.time.string(from: ts))
-                    .font(.caption2)
+                    .font(.caption)
                     .foregroundStyle(.tertiary)
             }
         }
@@ -423,10 +440,12 @@ private struct MessageBubble: View {
                         Text(parsed.message)
                     }
                 }
+                .chatBodyFont()
                 .bubble(isMine: isMine)
                 .copyable(parsed.message)
             } else if let body = message.body, !body.isEmpty {
                 Text(body)
+                    .chatBodyFont()
                     .bubble(isMine: isMine)
                     .copyable(body)
             }
@@ -463,7 +482,7 @@ private struct PendingBubble: View {
                         .frame(maxWidth: 200, maxHeight: 240)
                         .clipShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
                 } else if let body = message.body {
-                    Text(body).bubble(isMine: true)
+                    Text(body).chatBodyFont().bubble(isMine: true)
                 }
             }
             .opacity(message.failed || message.delivered ? 1 : 0.6)
