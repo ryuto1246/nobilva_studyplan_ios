@@ -111,7 +111,8 @@ struct ChatRoomView: View {
             }
             .defaultScrollAnchor(.bottom)
             .scrollDismissesKeyboard(.interactively)
-            .background(Theme.groupedBackground)
+            // ステータスバーの下まで同じ色にする (iPad で上に白い帯が出ないように)。
+            .background(Theme.groupedBackground.ignoresSafeArea())
             .onChange(of: messages.last?.id) { _, _ in
                 if isAtBottom { withAnimation { proxy.scrollTo("bottom", anchor: .bottom) } }
             }

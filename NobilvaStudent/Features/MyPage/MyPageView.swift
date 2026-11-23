@@ -12,7 +12,6 @@ struct MyPageView: View {
     @State private var path: [MyPageRoute] = []
     /// iPad: 右側に出している画面。最初は計画を出しておく (空の画面を見せない)。
     @State private var selection: MyPageRoute? = .plans(date: nil)
-    @State private var columnVisibility: NavigationSplitViewVisibility = .all
     @State private var showLogoutConfirm = false
 
     static let appVersion: String = {
@@ -28,11 +27,10 @@ struct MyPageView: View {
         Group {
             if isRegular {
                 // iPad: 左にメニュー、右に選んだ画面 (設定アプリと同じ形)。
-                NavigationSplitView(columnVisibility: $columnVisibility) {
+                TwoColumnLayout {
                     menu
-                        .navigationSplitViewColumnWidth(min: 340, ideal: 380, max: 440)
                 } detail: {
-                    NavigationStack {
+                    Group {
                         if let selection {
                             destination(selection)
                         } else {
@@ -41,7 +39,6 @@ struct MyPageView: View {
                     }
                     .id(selection)
                 }
-                .navigationSplitViewStyle(.balanced)
             } else {
                 NavigationStack(path: $path) {
                     menu
@@ -61,14 +58,7 @@ struct MyPageView: View {
     @ViewBuilder
     private var menu: some View {
         ScrollViewReader { proxy in
-            Group {
-                // iPad は選択中の行を強調するため selection 付きの List にする。
-                if isRegular {
-                    List(selection: $selection) { sections }
-                } else {
-                    List { sections }
-                }
-            }
+            List { sections }
             .listStyle(.insetGrouped)
             .navigationTitle("マイページ")
             // ツアーが画面外の行を指したらそこまでスクロールする。
@@ -91,7 +81,7 @@ struct MyPageView: View {
                 .listRowInsets(EdgeInsets(top: 8, leading: 8, bottom: 8, trailing: 8))
                 .tourTarget(.myPageWeek)
                 .id(TourTarget.myPageWeek)
-            NavigationLink(value: MyPageRoute.plans(date: nil)) {
+            link(.plans(date: nil)) {
                 LabeledRow("すべての計画", systemImage: "calendar")
             }
         } header: {
@@ -115,30 +105,28 @@ struct MyPageView: View {
         }
 
         Section("予定") {
-            NavigationLink(value: MyPageRoute.meetings) {
+            link(.meetings) {
                 LabeledRow("面談", systemImage: "person.2.fill")
             }
-            NavigationLink(value: MyPageRoute.busySlots) {
+            link(.busySlots, tour: .myPageBusySlots) {
                 LabeledRow("使えない時間", systemImage: "clock.badge.xmark")
             }
-            .tourTarget(.myPageBusySlots)
-            .id(TourTarget.myPageBusySlots)
         }
 
         Section("設定") {
-            NavigationLink(value: MyPageRoute.account) {
+            link(.account) {
                 LabeledRow("アカウント", systemImage: "person.crop.circle")
             }
-            NavigationLink(value: MyPageRoute.study) {
+            link(.study) {
                 LabeledRow("学年・学習時間", systemImage: "graduationcap")
             }
-            NavigationLink(value: MyPageRoute.pomodoro) {
+            link(.pomodoro) {
                 LabeledRow("ポモドーロ", systemImage: "timer")
             }
-            NavigationLink(value: MyPageRoute.notifications) {
+            link(.notifications) {
                 LabeledRow("通知", systemImage: "bell")
             }
-            NavigationLink(value: MyPageRoute.security) {
+            link(.security) {
                 LabeledRow("パスキー・パスワード", systemImage: "lock.shield")
             }
         }
@@ -160,13 +148,37 @@ struct MyPageView: View {
                 .confirmationDialog("ログアウトしますか？", isPresented: $showLogoutConfirm, titleVisibility: .visible) {
                     Button("ログアウト", role: .destructive) { Task { await auth.logout() } }
                 }
-            NavigationLink(value: MyPageRoute.deleteAccount) {
+            link(.deleteAccount) {
                 Text("アカウントを削除").foregroundStyle(.red)
             }
         } footer: {
             Text("バージョン \(Self.appVersion)")
                 .frame(maxWidth: .infinity)
                 .padding(.top, 8)
+        }
+    }
+
+    /// メニューの 1 行。iPhone は push、iPad は右側の画面を切り替えて、選んでいる行を色で示す。
+    @ViewBuilder
+    /// `tour` はツアーで指す行の目印。行の外側に付けると listRowBackground が効かなくなるので、ここで付ける。
+    private func link<Label: View>(_ route: MyPageRoute, tour: TourTarget? = nil,
+                                   @ViewBuilder label: () -> Label) -> some View {
+        if isRegular {
+            let isSelected = selection?.isSameScreen(as: route) == true
+            Button { selection = route } label: {
+                HStack {
+                    label()
+                    Spacer(minLength: 0)
+                }
+                .contentShape(Rectangle())
+            }
+            .buttonStyle(.plain)
+            .tourMarker(tour)
+            .listRowBackground(isSelected ? Theme.accent.opacity(0.18) : Theme.secondaryBackground)
+            .accessibilityAddTraits(isSelected ? .isSelected : [])
+        } else {
+            NavigationLink(value: route) { label() }
+                .tourMarker(tour)
         }
     }
 
@@ -197,6 +209,14 @@ enum MyPageRoute: Hashable {
     case notifications
     case security
     case deleteAccount
+
+    /// 開く画面が同じか (計画はどの日から開いても同じ画面として扱う)。
+    func isSameScreen(as other: MyPageRoute) -> Bool {
+        switch (self, other) {
+        case (.plans, .plans): return true
+        default: return self == other
+        }
+    }
 }
 
 extension MyPageView {
@@ -250,6 +270,18 @@ struct ExternalLinkRow: View {
                         .foregroundStyle(.tertiary)
                 }
             }
+        }
+    }
+}
+
+extension View {
+    /// ツアーで指せるようにし、スクロールで移動できるよう id も付ける。nil なら何もしない。
+    @ViewBuilder
+    fileprivate func tourMarker(_ target: TourTarget?) -> some View {
+        if let target {
+            tourTarget(target).id(target)
+        } else {
+            self
         }
     }
 }
