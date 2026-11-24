@@ -56,11 +56,6 @@ struct TimerRepository {
                            body: ManualBody(plan_item_id: planItemId, duration_minutes: durationMinutes))
     }
 
-    // MARK: - Today plan items for picker
-    func todayPlan() async throws -> PlanForDate {
-        try await PlanRepository(api: api).fetchDay(JSTDate.todayString())
-    }
-
     // MARK: - Pomodoro prefs
     func pomodoroPrefs() async throws -> StudentProfile {
         try await api.get("/api/v1/student/profile/student")

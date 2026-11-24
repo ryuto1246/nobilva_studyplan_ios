@@ -35,7 +35,11 @@ actor APIClient {
     }()
 
     init(session: URLSession = .shared) {
+        #if DEBUG
+        self.session = ScreenshotMode.isEnabled ? ScreenshotMode.session : session
+        #else
         self.session = session
+        #endif
     }
 
     // MARK: - Public request helpers

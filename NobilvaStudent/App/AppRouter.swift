@@ -31,6 +31,8 @@ final class AppRouter: ObservableObject {
     struct ConsultRequest: Identifiable {
         let id = UUID()
         let card: ChatTaskCard
+        /// 相談のもとになったやること。送れたら、計画アイテムは返事を待つ間いったん外す。
+        var item: StudyItem?
     }
 
     /// 「取り組む」。計測中なら対象は変えずにタイマーを開くだけ。
@@ -44,6 +46,6 @@ final class AppRouter: ObservableObject {
     }
 
     func consult(_ item: StudyItem) {
-        consulting = ConsultRequest(card: item.consultCard)
+        consulting = ConsultRequest(card: item.consultCard, item: item)
     }
 }

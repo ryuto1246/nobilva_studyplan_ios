@@ -80,7 +80,7 @@ private struct DayCell: View {
         .contentShape(Rectangle())
         .accessibilityElement(children: .ignore)
         .accessibilityLabel("\(JSTDate.monthDay(day.date))\(isToday ? "、今日" : "")")
-        .accessibilityValue(day.items.isEmpty ? "計画なし" : "\(day.items.count)件中\(day.doneCount)件完了")
+        .accessibilityValue(day.items.isEmpty ? "計画なし" : "\(day.items.count)件中\(day.completedCount)件完了" + (day.skippedCount > 0 ? "、\(day.skippedCount)件スキップ" : ""))
         .accessibilityAddTraits(isSelected ? [.isButton, .isSelected] : .isButton)
     }
 

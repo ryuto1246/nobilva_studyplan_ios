@@ -10,7 +10,13 @@ struct StudyItem: Identifiable, Hashable {
     let title: String
     let subject: String
     let minutes: Int
+    /// 片付いたか (完了 or スキップ)。「やること」一覧から外すかどうかはこれで決める。
     let isDone: Bool
+    /// 生徒が「やらない」を選んだもの。isDone も true になる。計画アイテムだけ。
+    let isSkipped: Bool
+    let skipReason: String?
+    /// スキップ・相談中のものに先生が対応したときの一言 (「先生が 11/20 の計画に入れ直しました」)。
+    let teacherFollowup: String?
     /// 計画アイテムの plan_date。タスクでは nil。
     let date: String?
     let startTime: String?
@@ -19,6 +25,10 @@ struct StudyItem: Identifiable, Hashable {
     let overdueDays: Int
     let rationale: String?
     let sortOrder: Int
+    /// 計画アイテムの元になったタスク。タスク自身では nil。
+    let taskId: String?
+    /// タスクに設定された「やりたい時間帯」。計画アイテムは startTime から決まるので nil。
+    let preferredTimeOfDay: TimeOfDay?
 
     init(planItem p: PlanItem, date: String?) {
         id = p.id
@@ -27,13 +37,19 @@ struct StudyItem: Identifiable, Hashable {
         subject = p.subject
         minutes = p.durationMinutes
         isDone = p.status.isDone
+        isSkipped = p.status == .skipped
+        skipReason = p.status == .skipped ? p.skipReason : nil
+        teacherFollowup = p.status == .skipped ? Self.followupText(p.skipFollowup, date: p.skipFollowupDate) : nil
         self.date = date
         startTime = p.startTime
         dueDate = nil
-        overdueDays = 0
+        // 前日までの計画は「N日遅れ」を出す (今日・先の日は 0)。
+        overdueDays = date.map(JSTDate.daysOverdue) ?? 0
         // Web と同じく AI の「優先度」系の理由は出さない。
         rationale = (p.rationale?.contains("優先度") ?? true) ? nil : p.rationale
         sortOrder = p.sortOrder
+        taskId = p.taskId
+        preferredTimeOfDay = nil
     }
 
     init(task t: StudentTask) {
@@ -43,23 +59,50 @@ struct StudyItem: Identifiable, Hashable {
         subject = t.subject
         minutes = t.estimatedMinutes
         isDone = t.status == .completed
+        isSkipped = false
+        skipReason = nil
+        teacherFollowup = nil
         date = nil
         startTime = nil
         dueDate = t.dueDate
         overdueDays = [t.dueDate, t.scheduledDate].compactMap { $0 }.map(JSTDate.daysOverdue).max() ?? 0
         rationale = nil
         sortOrder = 0
+        taskId = nil
+        preferredTimeOfDay = t.preferredTimeOfDay
     }
 
-    private init(copying o: StudyItem, isDone: Bool) {
+    /// 楽観的更新で使う、手元で切り替えた状態。
+    enum Resolution: Equatable {
+        case open, done
+        case skipped(reason: String?)
+    }
+
+    var resolution: Resolution {
+        if isSkipped { return .skipped(reason: skipReason) }
+        return isDone ? .done : .open
+    }
+
+    private init(copying o: StudyItem, resolution: Resolution) {
         id = o.id; kind = o.kind; title = o.title; subject = o.subject; minutes = o.minutes
-        self.isDone = isDone
+        switch resolution {
+        case .open: isDone = false; isSkipped = false; skipReason = nil
+        case .done: isDone = true; isSkipped = false; skipReason = nil
+        case .skipped(let reason): isDone = true; isSkipped = true; skipReason = reason
+        }
+        // 手元で状態を変えたら、先生の対応はもう当てはまらない (サーバーでも消える)。
+        teacherFollowup = resolution == o.resolution ? o.teacherFollowup : nil
         date = o.date; startTime = o.startTime; dueDate = o.dueDate; overdueDays = o.overdueDays
-        rationale = o.rationale; sortOrder = o.sortOrder
+        rationale = o.rationale; sortOrder = o.sortOrder; taskId = o.taskId; preferredTimeOfDay = o.preferredTimeOfDay
     }
 
     /// 楽観的更新用。完了状態だけ差し替えたコピー。
-    func withDone(_ done: Bool) -> StudyItem { StudyItem(copying: self, isDone: done) }
+    func withDone(_ done: Bool) -> StudyItem { with(done ? .done : .open) }
+
+    func with(_ resolution: Resolution) -> StudyItem { StudyItem(copying: self, resolution: resolution) }
+
+    /// スキップできるのは計画アイテムだけ (タスクにはスキップの状態が無い。やめるなら削除)。
+    var canSkip: Bool { kind == .planItem && !isDone }
 
     /// セッション開始 API に渡す plan_item_id。タスクは紐付けない。
     var planItemId: String? { kind == .planItem ? id : nil }
@@ -73,21 +116,52 @@ struct StudyItem: Identifiable, Hashable {
     }
 
     /// 「（20問）」のような分量表記がタイトルにあればそれ、無ければ所要時間。
+    /// 「（追加）」のように数字を含まない括弧は分量ではないので使わない。
     var amountLabel: String {
-        if let range = title.range(of: #"（([^）]+)）"#, options: .regularExpression) {
+        if let range = title.range(of: #"（[^）]*[0-9０-９][^）]*）"#, options: .regularExpression) {
             return String(title[range].dropFirst().dropLast())
         }
         return formatMinutes(minutes)
     }
 
-    /// 行の 2 行目のうち科目以外 (分量・期限)。科目は色付きバッジで別に出す。
+    /// 行に出す時間帯。計画アイテムは開始時刻から、タスクは設定されていればその時間帯。
+    var timeOfDayLabel: String? {
+        switch kind {
+        case .planItem: return timeOfDay.label
+        case .task: return preferredTimeOfDay?.label
+        }
+    }
+
+    /// 行の 2 行目のうち科目以外 (時間帯・分量・期限)。科目は色付きバッジで別に出す。
     var detailText: String {
-        var parts: [String] = [amountLabel]
+        var parts: [String] = [timeOfDayLabel, amountLabel].compactMap { $0 }
         if let dueDate, overdueDays == 0 { parts.append("期限 \(JSTDate.monthDay(dueDate))") }
         return parts.joined(separator: " · ")
     }
 
     var overdueLabel: String? { overdueDays > 0 ? "\(overdueDays)日遅れ" : nil }
+
+    private static func followupText(_ kind: String?, date: String?) -> String? {
+        switch kind {
+        case "rescheduled":
+            guard let date else { return "先生が計画に入れ直しました" }
+            return "先生が\(JSTDate.monthDay(date))の計画に入れ直しました"
+        case "task": return "先生がタスクにしました"
+        default: return nil
+        }
+    }
+
+    /// 相談を送ったので、先生の返事を待っているもの (スキップの一種として保存している)。
+    var isWaitingForTeacher: Bool { isSkipped && skipReason == SkipReason.consultedReason }
+
+    /// スキップした行の 2 行目。「スキップ · 時間が足りなかった」。
+    var skippedLabel: String? {
+        guard isSkipped else { return nil }
+        if let teacherFollowup { return teacherFollowup }
+        if isWaitingForTeacher { return "先生に相談中" }
+        guard let skipReason, !skipReason.isEmpty else { return "スキップ" }
+        return "スキップ · \(skipReason)"
+    }
 
     var consultCard: ChatTaskCard {
         switch kind {

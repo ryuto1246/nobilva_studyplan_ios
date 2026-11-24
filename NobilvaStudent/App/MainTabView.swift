@@ -10,6 +10,10 @@ struct MainTabView: View {
     @EnvironmentObject var timer: StudyTimer
     @EnvironmentObject var toast: ToastCenter
     @EnvironmentObject var tour: TourController
+    @Environment(\.scenePhase) private var scenePhase
+    /// 一度バックグラウンドに入ったか。復帰は background → inactive → active と
+    /// 段階を踏むので、直前の値ではなくこのフラグで「戻ってきた」を判定する。
+    @State private var wentToBackground = false
 
     enum Tab: Hashable {
         case today, chat, myPage
@@ -36,6 +40,22 @@ struct MainTabView: View {
         .task {
             chatUnread.start(api: auth.api)
             timer.attach(api: auth.api)
+            // メイン画面が出た = ログイン済みでアプリを開いた。講師側で確認できるよう記録する。
+            await AppOpenTracker.shared.record(api: auth.api)
+        }
+        // バックグラウンドから戻ってきたときも「開いた」として記録する。
+        // (通知センターを下ろしただけの inactive → active は数えない)
+        .onChange(of: scenePhase) { _, new in
+            switch new {
+            case .background:
+                wentToBackground = true
+            case .active where wentToBackground:
+                wentToBackground = false
+                guard auth.phase == .authenticated else { return }
+                Task { await AppOpenTracker.shared.record(api: auth.api) }
+            default:
+                break
+            }
         }
         .onDisappear { chatUnread.stop() }
         // 使い方ツアー。タブバーごと覆うので TabView の上に重ねる。
@@ -49,6 +69,10 @@ struct MainTabView: View {
         }
         .task {
             tour.userId = auth.currentUser?.id
+            #if DEBUG
+            // 撮影モードではツアーも通知許可のダイアログも出さない。
+            if ScreenshotMode.isEnabled { return }
+            #endif
             guard !tour.hasCompleted else {
                 await PushService.shared.requestAuthorizationAndRegister()
                 return
@@ -77,8 +101,34 @@ struct MainTabView: View {
             RecordOnCompleteSheet(item: req.item, onChoose: req.onChoose)
         }
         .sheet(item: $router.consulting) { req in
-            TaskChatSheet(card: req.card, onSuccess: { toast.show("先生に相談を送りました") })
+            TaskChatSheet(card: req.card, onSuccess: { holdForConsultation(req.item) })
                 .environmentObject(auth)
+        }
+    }
+
+    /// 相談を送ったら、返事を待つ間その計画アイテムを「先生に相談中」(スキップ扱い) にして、
+    /// 「まずはこれ」を次のやることに進める。先生は返事のあとで計画に戻すかタスクにできる。
+    /// タスクや片付いたものは状態を変えない。
+    private func holdForConsultation(_ item: StudyItem?) {
+        guard let item, item.canSkip else {
+            toast.show("先生に相談を送りました")
+            return
+        }
+        toast.show("先生に相談を送りました。返事が来るまで、この計画はいったん外しておきます",
+                   systemImage: "bubble.left.fill", tint: Theme.accent, feel: .success)
+        let held = StudyItem.Resolution.skipped(reason: SkipReason.consultedReason)
+        NotificationCenter.default.post(name: .studyItemResolutionDidChange,
+                                        object: StudyItemResolutionChange(itemId: item.id, resolution: held))
+        Task {
+            do {
+                try await TodayRepository(api: auth.api).skip(item, reason: SkipReason.consultedReason)
+                NotificationCenter.default.post(name: .studyDataDidChange, object: nil)
+            } catch {
+                NotificationCenter.default.post(name: .studyItemResolutionDidChange,
+                                                object: StudyItemResolutionChange(itemId: item.id, resolution: item.resolution))
+                // 相談自体は届いているので、外せなかったことだけ控えめに伝える。
+                toast.showError("相談は送りましたが、計画から外せませんでした")
+            }
         }
     }
 }

@@ -32,3 +32,10 @@ fastlane/test_output
 *.mobileprovision
 *.cer
 AuthKey_*.p8
+
+# Claude Code の個人設定・worktree
+.claude/settings.local.json
+.claude/worktrees/
+
+# Supabase CLI のキャッシュ
+supabase/.temp/

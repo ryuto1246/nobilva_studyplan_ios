@@ -16,11 +16,13 @@ struct StudyItemRow: View {
     var showsStartIcon = true
     var onConsult: (() -> Void)?
     var onEdit: (() -> Void)?
+    /// 「やらない (スキップ)」。計画アイテムでまだ片付いていない行だけメニューに出す。
+    var onSkip: (() -> Void)?
 
     var body: some View {
         HStack(alignment: .center, spacing: 4) {
             if let onToggle {
-                CompletionToggle(isDone: item.isDone, title: item.title, action: onToggle)
+                CompletionToggle(isDone: item.isDone, isSkipped: item.isSkipped, title: item.title, action: onToggle)
             }
             if let onTap {
                 Button(action: onTap) { rowContent }
@@ -45,10 +47,17 @@ struct StudyItemRow: View {
             }
             if let onToggle {
                 Button { onToggle() } label: {
-                    item.isDone
-                        ? Label("未完了に戻す", systemImage: "arrow.uturn.backward")
-                        : Label("完了にする", systemImage: "checkmark.circle")
+                    if item.isSkipped {
+                        Label("スキップを取り消す", systemImage: "arrow.uturn.backward")
+                    } else if item.isDone {
+                        Label("未完了に戻す", systemImage: "arrow.uturn.backward")
+                    } else {
+                        Label("完了にする", systemImage: "checkmark.circle")
+                    }
                 }
+            }
+            if let onSkip, item.canSkip {
+                Button { onSkip() } label: { Label("やらない（スキップ）", systemImage: "forward.end") }
             }
         }
     }
@@ -82,7 +91,8 @@ struct StudyItemText: View {
             Text(item.title)
                 .font(titleFont)
                 .fixedSize(horizontal: false, vertical: true)
-                .strikethrough(item.isDone)
+                // スキップは「終えた」わけではないので線は引かず、薄くするだけにする。
+                .strikethrough(item.isDone && !item.isSkipped)
                 .foregroundStyle(item.isDone ? Theme.secondaryLabel : Color.primary)
                 .multilineTextAlignment(.leading)
             // アクセシビリティ用の大きな文字では、バッジと詳細を縦に積む。
@@ -111,6 +121,9 @@ struct StudyItemText: View {
 
     private var detail: Text {
         let rest = Text(item.detailText).foregroundStyle(Theme.secondaryLabel)
+        if let skipped = item.skippedLabel {
+            return Text(skipped).foregroundStyle(Theme.secondaryLabel).bold() + Text(" · ").foregroundStyle(Theme.secondaryLabel) + rest
+        }
         guard let overdue = item.overdueLabel, !item.isDone else { return rest }
         return Text(overdue).foregroundStyle(.red).bold() + Text(" · ").foregroundStyle(Theme.secondaryLabel) + rest
     }
@@ -137,20 +150,26 @@ struct SubjectBadge: View {
 /// 丸いチェック。見た目は 24pt、タップ領域は 44pt。
 struct CompletionToggle: View {
     let isDone: Bool
+    var isSkipped = false
     let title: String
     let action: () -> Void
 
     var body: some View {
         Button(action: action) {
-            Image(systemName: isDone ? "checkmark.circle.fill" : "circle")
+            Image(systemName: icon)
                 .font(.title2)
-                .foregroundStyle(isDone ? Theme.accent : Theme.secondaryLabel)
+                .foregroundStyle(isDone && !isSkipped ? Theme.accent : Theme.secondaryLabel)
                 .frame(width: 44, height: 44)
                 .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
-        .accessibilityLabel(isDone ? "未完了に戻す" : "完了にする")
-        .accessibilityValue(isDone ? "完了" : "未完了")
+        .accessibilityLabel(isSkipped ? "スキップを取り消す" : isDone ? "未完了に戻す" : "完了にする")
+        .accessibilityValue(isSkipped ? "スキップ" : isDone ? "完了" : "未完了")
+    }
+
+    private var icon: String {
+        if isSkipped { return "forward.end.circle.fill" }
+        return isDone ? "checkmark.circle.fill" : "circle"
     }
 }
 

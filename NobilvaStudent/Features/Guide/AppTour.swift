@@ -19,6 +19,7 @@ enum TourTarget: String, Hashable {
     case todayFocus
     case todayNextUp
     case todayAddButton
+    case todayTimerButton
     case chatFirstContact
     case myPageWeek
     case myPageStats
@@ -46,6 +47,9 @@ struct TourStep {
         TourStep(tab: .today, target: .todayAddButton,
                  title: "タスクを追加",
                  message: "宿題や自分で進めたいことは、ここからタスクとして登録できます。"),
+        TourStep(tab: .today, target: .todayTimerButton,
+                 title: "タイマー",
+                 message: "計画にないことを勉強するときや、計画を終えたあとに自習するときは、ここからタイマーを開いて時間を記録できます。"),
         TourStep(tab: .chat, target: .chatFirstContact,
                  title: "チャット",
                  message: "担当の先生ごとにカードが並びます。開くとチャットができ、その先生との次の面談も確認できます。"),
@@ -131,16 +135,20 @@ final class TourController: ObservableObject {
 /// 別タブに隠れた画面は frame を消さずに「非表示」とだけ記録する。
 /// 再表示されても位置が同じなら onGeometryChange は呼ばれないため、
 /// 消してしまうとタブを戻ったときに対象を指せなくなる。
+///
+/// 表示中かどうかは、同じ目印を持つビューの数で数える。読み込みで見本 → 本物のように
+/// ビューが入れ替わると、新しい方の onAppear が古い方の onDisappear より先に
+/// 呼ばれることがあり、真偽値だと最後の「非表示」で上書きされてくり抜きが消えるため。
 @MainActor
 final class TourGeometry: ObservableObject {
     private var frames: [TourTarget: CGRect] = [:]
-    private var hidden: Set<TourTarget> = []
+    private var visibleCount: [TourTarget: Int] = [:]
     var isPublishing = false {
         didSet { if isPublishing { objectWillChange.send() } }
     }
 
     func frame(of target: TourTarget) -> CGRect? {
-        hidden.contains(target) ? nil : frames[target]
+        (visibleCount[target] ?? 0) > 0 ? frames[target] : nil
     }
 
     func set(_ target: TourTarget, _ frame: CGRect) {
@@ -150,9 +158,10 @@ final class TourGeometry: ObservableObject {
     }
 
     func setVisible(_ target: TourTarget, _ visible: Bool) {
-        guard hidden.contains(target) == visible else { return }
-        if isPublishing { objectWillChange.send() }
-        if visible { hidden.remove(target) } else { hidden.insert(target) }
+        let old = visibleCount[target] ?? 0
+        let new = max(0, old + (visible ? 1 : -1))
+        visibleCount[target] = new
+        if isPublishing, (old > 0) != (new > 0) { objectWillChange.send() }
     }
 }
 
@@ -188,6 +197,7 @@ private struct TourTargetModifier: ViewModifier {
 struct TourOverlay: View {
     @ObservedObject var tour: TourController
     @ObservedObject private var geometry: TourGeometry
+    @Environment(\.colorScheme) private var colorScheme
 
     init(tour: TourController) {
         self.tour = tour
@@ -231,8 +241,9 @@ struct TourOverlay: View {
     }
 
     private func dimLayer(hole: CGRect?) -> some View {
+        // ダークモードは元の画面がほぼ黒なので、同じ濃さだと対象以外がほとんど暗くならない。
         Rectangle()
-            .fill(.black.opacity(0.6))
+            .fill(.black.opacity(colorScheme == .dark ? 0.8 : 0.6))
             .mask {
                 Rectangle()
                     .overlay {
@@ -285,6 +296,7 @@ private struct TourBubble: View {
     let onBack: () -> Void
     let onNext: () -> Void
     let onSkip: () -> Void
+    @Environment(\.colorScheme) private var colorScheme
 
     private var isLast: Bool { index == total - 1 }
 
@@ -320,8 +332,15 @@ private struct TourBubble: View {
         }
         .padding(Theme.cardPadding)
         .frame(maxWidth: 440)
-        .background(Theme.secondaryBackground)
+        // ダークモードでは暗幕と背景色が近く沈んで見えるので、一段明るい面と縁取りで浮かせる。
+        .background(colorScheme == .dark ? Color(UIColor.tertiarySystemGroupedBackground) : Theme.secondaryBackground)
         .clipShape(RoundedRectangle(cornerRadius: Theme.cardCorner, style: .continuous))
+        .overlay {
+            if colorScheme == .dark {
+                RoundedRectangle(cornerRadius: Theme.cardCorner, style: .continuous)
+                    .strokeBorder(.white.opacity(0.25), lineWidth: 1)
+            }
+        }
         .shadow(color: .black.opacity(0.25), radius: 16, y: 6)
         .id(index)
         .transition(.opacity)
